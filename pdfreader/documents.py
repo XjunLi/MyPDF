@@ -144,7 +144,6 @@ class DocumentTabs:
                     self.document_tabs.setCurrentIndex(index)
                     break
             self.document_tabs.blockSignals(False)
-            self.terminal.cwd = str(session.document.path.parent) if session.document.path else str(Path.home())
             if session.search_pending and session.search_text.strip():
                 # A cancelled batch must restart, not jump to its partial result.
                 self.search_query = ""
@@ -316,7 +315,6 @@ class DocumentTabs:
                 self.ai.persist_state(state)
             self.update_state()
             if session is self.active_session:
-                self.terminal.cwd = str(document.path.parent)
                 self.status_label.setText("已保存并验证：" + str(path))
             return True
         except Exception as exc:

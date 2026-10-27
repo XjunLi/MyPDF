@@ -58,7 +58,7 @@ def test_ai_url_and_plugin_validation():
     for url in ["http://example.com/v1", "file:///tmp/secret", "https://key:pass@example.com", "https://example.com/?key=x"]:
         with pytest.raises(ValueError):
             validate_endpoint(url)
-    assert validate_plugin({"name": "Local CLI", "kind": "terminal", "command": ["ollama", "run", "model"]})
+    assert validate_plugin({"name": "Local AI", "kind": "ai", "endpoint": "http://127.0.0.1:11434/v1", "model": "local-model"})
     with pytest.raises(ValueError):
         validate_plugin({"name": "Unsafe shape", "kind": "terminal", "command": "shell text"})
 

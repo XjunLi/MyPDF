@@ -12,12 +12,12 @@ def test_upgrade_keeps_settings_key_and_plugins_without_changing_legacy(tmp_path
     original = {"auto_ocr": False, "language": "eng", "ai": {"enabled": False, "model": "model-test", "remember_key": True, "protected_key": protect("local-test-key")}}
     saved = json.dumps(original)
     (old / "settings.json").write_text(saved, encoding="utf-8")
-    (old / "plugins" / "test.json").write_text(json.dumps({"name": "CLI", "kind": "terminal", "command": ["cmd.exe"]}), encoding="utf-8")
+    (old / "plugins" / "test.json").write_text(json.dumps({"name": "Local AI", "kind": "ai", "endpoint": "http://127.0.0.1:11434/v1", "model": "local-model"}), encoding="utf-8")
     settings = Settings()
     assert settings.values["ai"]["key"] == "local-test-key"
     assert settings.values["auto_ocr"] is True
     assert settings.values["automatic_ocr_v3"] is True
-    assert plugins()[0]["name"] == "CLI"
+    assert plugins()[0]["name"] == "Local AI"
     settings.save()
     assert settings.path.parent.name == "PDFReader"
     assert "local-test-key" not in settings.path.read_text()

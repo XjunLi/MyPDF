@@ -72,19 +72,14 @@ class Settings:
 
 
 def validate_plugin(data):
-    if not isinstance(data, dict) or data.get("kind") not in ("terminal", "ai"):
-        raise ValueError("插件必须是 kind 为 terminal 或 ai 的 JSON 清单。")
+    if not isinstance(data, dict) or data.get("kind") != "ai":
+        raise ValueError("当前仅支持 kind 为 ai 的服务预设；终端插件已暂时停用。")
     if not isinstance(data.get("name"), str) or not 1 <= len(data["name"]) <= 60:
         raise ValueError("插件名称需要 1–60 个字符。")
-    if data["kind"] == "terminal":
-        command = data.get("command")
-        if not isinstance(command, list) or not command or not all(isinstance(v, str) and v and "\0" not in v for v in command):
-            raise ValueError("terminal 插件的 command 应为命令和参数的数组。")
-    else:
-        from .ai import validate_endpoint
-        validate_endpoint(data.get("endpoint", ""))
-        if not isinstance(data.get("model"), str):
-            raise ValueError("AI 插件需要 model 字段。")
+    from .ai import validate_endpoint
+    validate_endpoint(data.get("endpoint", ""))
+    if not isinstance(data.get("model"), str):
+        raise ValueError("AI 插件需要 model 字段。")
     return data
 
 

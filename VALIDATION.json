@@ -1,8 +1,11 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "date": "2026-10-27",
-  "unit_tests_passed": 140,
-  "packaged_checks": [
+  "platform": "Windows 11 x64 build 26200",
+  "python": "3.12.14",
+  "unit_tests_passed": 141,
+  "errors": [],
+  "source_checks": [
     "open_sample",
     "selection_only_highlight_and_hidden_ocr_button",
     "chinese_edit_preserves_font_size_and_color",
@@ -12,7 +15,7 @@
     "auto_ocr_english_and_chinese",
     "ocr_text_mouse_selection",
     "screenshot",
-    "conpty_command_output",
+    "terminal_removed_and_two_side_panels",
     "reopen_saved_document",
     "multi_document_tabs_state_undo_and_duplicate_open",
     "footer_tabs_and_hand_tool_in_menu",
@@ -26,123 +29,40 @@
     "centered_toolbar_and_close_tabs_to_welcome",
     "close_and_cleanup"
   ],
-  "errors": [],
+  "source_ok": true,
+  "packaged_checks": [
+    "open_sample",
+    "selection_only_highlight_and_hidden_ocr_button",
+    "chinese_edit_preserves_font_size_and_color",
+    "horizontal_chinese_selection_and_clipboard",
+    "selection_highlight_undo_redo",
+    "text_comment_with_persistent_quote",
+    "auto_ocr_english_and_chinese",
+    "ocr_text_mouse_selection",
+    "screenshot",
+    "terminal_removed_and_two_side_panels",
+    "reopen_saved_document",
+    "multi_document_tabs_state_undo_and_duplicate_open",
+    "footer_tabs_and_hand_tool_in_menu",
+    "ai_native_markdown_and_image_payload",
+    "ai_no_attachment_no_old_image_upload",
+    "sqlite_encrypted_draft_and_chat",
+    "sqlite_reopen_document_restore",
+    "ai_full_pdf_current_page_and_selection",
+    "sqlite_full_document_encrypted_and_deduplicated",
+    "ai_full_text_compatibility_with_current_page",
+    "centered_toolbar_and_close_tabs_to_welcome",
+    "close_and_cleanup"
+  ],
   "packaged_ok": true,
   "packaged_display_scale": 1.5,
-  "icon_render_scales": [
-    1,
-    1.25,
-    1.5,
-    1.75,
-    2,
-    2.5,
-    3
-  ],
-  "prior_release_pdf_visual_check": {
-    "version": "0.3.0",
-    "renderer": "Poppler 120 dpi",
-    "image_size": [
-      993,
-      1404
-    ],
-    "difference_bounds": [
-      220,
-      775,
-      273,
-      802
-    ],
-    "only_replaced_characters_changed": true
-  },
-  "prior_release_multi_document_display_checks": {
-    "version": "0.4.1",
-    "checks": [
-      {
-        "display_scale": 1.0,
-        "toolbar_centered": true,
-        "toolbar_overflow": false,
-        "footer_overflow": false,
-        "tabs_location": "bottom_left",
-        "hand_tool_in_menu": true,
-        "tabs_count": 9,
-        "minimum_viewport_width": 464
-      },
-      {
-        "display_scale": 1.5,
-        "toolbar_centered": true,
-        "toolbar_overflow": false,
-        "footer_overflow": false,
-        "tabs_location": "bottom_left",
-        "hand_tool_in_menu": true,
-        "tabs_count": 9,
-        "minimum_viewport_width": 464
-      },
-      {
-        "display_scale": 2.0,
-        "toolbar_centered": true,
-        "toolbar_overflow": false,
-        "footer_overflow": false,
-        "tabs_location": "bottom_left",
-        "hand_tool_in_menu": true,
-        "tabs_count": 9,
-        "minimum_viewport_width": 464
-      }
-    ]
-  },
-  "ai_display_checks": [
-    {
-      "display_scale": 1.0,
-      "window": [
-        1000,
-        700
-      ],
-      "panel_width": 300,
-      "composer_controls_fit": true,
-      "toolbar_overflow": false,
-      "automatic_document_page_selection": true,
-      "preview_tabs": [
-        "document",
-        "page",
-        "selection"
-      ],
-      "markdown": "headings, bold, lists, quotes, table, inline code"
-    },
-    {
-      "display_scale": 1.5,
-      "window": [
-        1000,
-        700
-      ],
-      "panel_width": 300,
-      "composer_controls_fit": true,
-      "toolbar_overflow": false,
-      "automatic_document_page_selection": true,
-      "preview_tabs": [
-        "document",
-        "page",
-        "selection"
-      ],
-      "markdown": "headings, bold, lists, quotes, table, inline code"
-    },
-    {
-      "display_scale": 2.0,
-      "window": [
-        1000,
-        700
-      ],
-      "panel_width": 300,
-      "composer_controls_fit": true,
-      "toolbar_overflow": false,
-      "automatic_document_page_selection": true,
-      "preview_tabs": [
-        "document",
-        "page",
-        "selection"
-      ],
-      "markdown": "headings, bold, lists, quotes, table, inline code"
-    }
-  ],
+  "terminal_loaded": false,
+  "terminal_dependencies_bundled": false,
   "sqlite_version": "3.53.4",
   "private_payload_encryption": "Windows current-user DPAPI",
-  "ai_service_validation": "In-process simulated HTTP responses; no private keys or real external services used",
-  "small_window_toolbar_overflow": false
+  "ai_service_validation": "In-process simulated HTTP responses; no private keys or external AI services used",
+  "development_directory": "E:\\MyPDF",
+  "build_directory": "dist/PDF Reader",
+  "version_control": "Git commits and annotated version tags",
+  "macos_supported": false
 }

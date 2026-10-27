@@ -19,7 +19,6 @@ from .engine import PdfDocument, PdfError, PasswordRequired, parse_page_range
 from .viewer import PdfView
 from .dialogs import TextDialog, SignatureDialog, CommentDialog
 from .panels import AIPanel
-from .terminal import TerminalPanel
 from .config import Settings, plugins, validate_plugin
 from .paths import data_root, resource_root, tessdata_path
 from .style import STYLE, prepare_fonts
@@ -181,13 +180,13 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.queue_visible_thumbs()
 
     def show_panel(self, key):
-        widget = {"ai": self.ai, "comment": self.comments, "terminal": self.terminal}[key]
+        widget = {"ai": self.ai, "comment": self.comments}[key]
         self.right.setCurrentWidget(widget)
         self.right.show()
         self.sync_panel_actions()
 
     def toggle_panel(self, key):
-        widget = {"ai": self.ai, "comment": self.comments, "terminal": self.terminal}.get(key)
+        widget = {"ai": self.ai, "comment": self.comments}.get(key)
         if key is None or (self.right.isVisible() and self.right.currentWidget() is widget):
             self.right.hide()
             self.sync_panel_actions()
@@ -195,7 +194,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             self.show_panel(key)
 
     def sync_panel_actions(self, *_):
-        for key, widget in [("ai", self.ai), ("comment", self.comments), ("terminal", self.terminal)]:
+        for key, widget in [("ai", self.ai), ("comment", self.comments)]:
             self.panel_actions[key].setChecked(self.right.isVisible() and self.right.currentWidget() is widget)
 
     def ask_selection(self):
@@ -829,13 +828,12 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             import uuid
             (directory / f"{uuid.uuid4().hex}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             self.update_plugins()
-            self.status_label.setText("已导入插件：" + data["name"] + "；可在终端列表或 AI 服务预设中选择。")
+            self.status_label.setText("已导入插件：" + data["name"] + "；可在 AI 服务预设中选择。")
         except Exception as exc:
             self.error(exc)
 
     def update_plugins(self):
         entries = plugins()
-        self.terminal.add_plugins(entries)
         self.plugin_menu.clear()
         for entry in entries:
             if entry["kind"] == "ai":
@@ -857,7 +855,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
                 "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；PDF 不受支持时可在设置中改用全文文字。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
                 "聊天记录：SQLite 自动保存到本机，Windows 当前用户加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"
-                "终端：点击启动运行 PowerShell 或插件命令。Ctrl+C 中断，Ctrl+V 粘贴；有选区时 Ctrl+C 复制。终端程序可自行联网。\n\n"
                 "范围：本版本提供主要阅读与编辑流程。暂不包含证书签章、PDF/A 校验、XFA、专业印前处理及 Word 排版转换。")
         QMessageBox.information(self, "使用说明", text)
 
@@ -885,7 +882,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         if self.ocr_process:
             self.ocr_process.waitForFinished(2000)
         self.ai.shutdown()
-        self.terminal.stop()
         for session in self.sessions:
             session.view.resize_timer.stop()
             session.view.scroll_timer.stop()

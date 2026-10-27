@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
 from .icons import icon, icon_button, split_tool_button
 from .viewer import PdfView
 from .panels import AIPanel
-from .terminal import TerminalPanel
 from .paths import resource_root
 
 
@@ -176,7 +175,7 @@ class ReaderLayout:
         self.top.addSeparator()
         self.left_action = self.toolbar_action(self.top, "sidebar", "页面与目录", self.toggle_left, "F8", checkable=True)
         self.panel_actions = {}
-        for key, label in [("ai", "AI 助手"), ("comment", "批注列表"), ("terminal", "终端")]:
+        for key, label in [("ai", "AI 助手"), ("comment", "批注列表")]:
             self.panel_actions[key] = self.toolbar_action(self.top, key, label, lambda checked=False, k=key: self.toggle_panel(k), checkable=True)
         self.toolbar_right_space = QWidget()
         self.toolbar_right_space.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -285,9 +284,6 @@ class ReaderLayout:
         cl.addWidget(self.comment_list, 1)
         self.right.addTab(self.comments, icon("comment"), "")
         self.right.setTabToolTip(1, "批注")
-        self.terminal = TerminalPanel()
-        self.right.addTab(self.terminal, icon("terminal"), "")
-        self.right.setTabToolTip(2, "终端")
         close_panel = icon_button("close", "收起侧栏", lambda: self.toggle_panel(None))
         self.right.setCornerWidget(close_panel)
         self.right.currentChanged.connect(self.sync_panel_actions)

@@ -31,7 +31,6 @@ PATHS = {
     "pages": '<path d="M8 3h12v15H8zM4 7v15h12"/>',
     "outline": '<path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/>',
     "ai": '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 2v4M18 4h4"/>',
-    "terminal": '<rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="m6 8 4 4-4 4m7 0h5"/>',
     "close": '<path d="m6 6 12 12M6 18 18 6"/>',
     "copy": '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
     "prev": '<path d="m14 5-7 7 7 7"/>',

@@ -1,16 +1,16 @@
-# PDF Reader 0.6.0
+# PDF Reader 0.6.1
 
-一个面向 Windows 的极简 PDF 阅读器。工具居中放在顶部，页码和缩放在底部，页面、AI、批注和终端侧栏按需展开。阅读、编辑、批注、手写签名和中英 OCR 均在本地完成。
+一个面向 Windows 的极简 PDF 阅读器。工具居中放在顶部，页码和缩放在底部，页面、AI 和批注侧栏按需展开。阅读、编辑、批注、手写签名和中英 OCR 均在本地完成。
 
-0.6.0 的阅读对话默认附加三层内容：整份 PDF 背景、当前页截图、有选区时的选中文字。首次提问时一起发送，后续提问继续携带全文背景；翻页或编辑后更新对应内容。输入框 ＋ 可调整范围，AI 设置提供全文文字兼容模式。聊天、草稿和文档背景写入本机加密 SQLite，支持恢复、历史、导出和删除。底部标签、居中工具栏、Markdown、原样式编辑、自动 OCR 和高 DPI 矢量图标继续保留。完整改动见 `CHANGELOG.md`。
+0.6.1 暂时移除终端，侧栏只保留 AI 与批注。阅读对话默认附加三层内容：整份 PDF 背景、当前页截图、有选区时的选中文字。首次提问时一起发送，后续提问继续携带全文背景；翻页或编辑后更新对应内容。输入框 ＋ 可调整范围，AI 设置提供全文文字兼容模式。聊天、草稿和文档背景写入本机加密 SQLite，支持恢复、历史、导出和删除。底部标签、居中工具栏、Markdown、原样式编辑、自动 OCR 和高 DPI 矢量图标继续保留。完整改动见 `CHANGELOG.md`。
 
 ## 运行
 
 **免安装版：**解压完整的 `PDFReader-Windows-x64.zip`，打开 `PDFReader` 文件夹，双击 `PDF Reader.exe`。请保留旁边的 `_internal` 文件夹。PDF 引擎、Qt 运行库、中英文 OCR 模型均已附带，无需 Python、Tesseract 安装或联网下载。
 
-**系统：**Windows 10/11 x64。启动后点击“试读示例”，即可体验包含文字页、扫描页和签名区域的示例文档。打开对话框可多选文件，也可一次拖入多份 PDF；命令行支持多个路径，如 `& '.\PDF Reader.exe' 'D:\Documents\a.pdf' 'D:\Documents\b.pdf'`。
+**系统：**目前仅支持 Windows 10/11 x64；macOS 尚未适配，Windows 可执行文件不能在 Mac 原生运行。启动后点击“试读示例”，即可体验包含文字页、扫描页和签名区域的示例文档。打开对话框可多选文件，也可一次拖入多份 PDF；命令行支持多个路径，如 `& '.\PDF Reader.exe' 'D:\Documents\a.pdf' 'D:\Documents\b.pdf'`。
 
-**源码：**Python 3.12，执行 `python -m pip install -r requirements.txt`，然后 `python main.py`。依赖安装需要联网，安装后的阅读、编辑和 OCR 不需要联网。`build.ps1` 可运行测试并重新打包。
+**源码：**Python 3.12，执行 `python -m pip install -r requirements.txt`，然后 `python main.py`。依赖安装需要联网，安装后的阅读、编辑和 OCR 不需要联网。`build.ps1` 可运行测试并重新打包。固定目录与 Git 版本流程见 [开发说明](DEVELOPMENT.md)。
 
 ## 已实现功能
 
@@ -38,8 +38,7 @@
 | AI 侧栏 | 流式 Markdown 回复，支持标题、列表、加粗、表格和代码；兼容 Chat Completions 服务 |
 | AI 附件 | 默认全文 + 当前页截图 + 选区；＋ 调整范围；点标签分栏预览，× 移除；仅在发送时请求服务 |
 | 聊天记录 | SQLite 本机加密保存；按 PDF 恢复聊天及草稿；历史列表、新对话、导出 Markdown 和删除 |
-| 本地终端 | 原生 Windows 伪终端，PowerShell、cmd 和 CLI 插件 |
-| 插件清单 | 导入 JSON，增加终端命令或 AI 服务预设 |
+| 插件清单 | 导入 JSON，增加 AI 服务预设 |
 
 保存使用同目录临时文件，重开验证后原子替换目标。关闭文档会单独询问是否保存；退出程序时可取消，保留所有打开的标签。另存为不会覆盖另一标签正在编辑的文件。
 
@@ -53,7 +52,6 @@ OCR 运行在独立进程，阅读界面可以继续使用；修改内容会取�
 - 签名是可见手写笔迹，**不是证书数字签名**，不提供身份认证、签名验证、时间戳或防篡改承诺。修改含证书签名的 PDF 可能影响原签名。
 - OCR 适合印刷体中英文。手写、复杂表格、低清晰度、多栏页面的结果需要复核。自动检测跳过已有文字层的页；混合图文页的局部 OCR、方向自动纠正和校对界面尚未实现。
 - 当前没有 PDF/A 校验、专业印前处理、测量、XFA、Word/Excel 格式转换、全文排版重建、证书签章或 Acrobat 插件兼容层。
-- 终端支持常用 ANSI/VT 命令行交互；复杂全屏 TUI 的兼容性有限。停止终端会结束它创建的进程树。终端是否联网取决于你运行的程序。
 - 原始文档不会自动保存或上传。尚未实现崩溃恢复、重启恢复标签、超大文档后台全文索引。超大页面的显示分辨率会受像素上限约束。
 
 ## 配置 AI
@@ -89,7 +87,7 @@ OCR 运行在独立进程，阅读界面可以继续使用；修改内容会取�
 
 ## 插件
 
-本版本使用清单式扩展，不加载第三方 Python 代码。`plugins` 目录提供示例。修改命令或模型名称，再通过顶部菜单中的“插件 → 导入插件清单”导入。
+本版本使用清单式扩展，不加载第三方 Python 代码。`plugins` 目录提供示例。修改服务地址和模型名称，再通过顶部菜单中的“插件 → 导入插件清单”导入。
 
 AI 清单示例：
 
@@ -97,13 +95,7 @@ AI 清单示例：
 {"name":"我的模型","kind":"ai","endpoint":"https://your-provider.example/v1","model":"model-name"}
 ```
 
-终端清单示例：
-
-```json
-{"name":"本地 AI","kind":"terminal","command":["ollama","run","your-installed-model"]}
-```
-
-AI 预设在“插件 → AI 服务预设”中选择；终端预设在终端下拉框中选择后点击三角形运行按钮。清单本身不会自动执行命令，也不会自动下载 CLI 或模型。终端执行的是本机程序，具有当前用户的文件访问权限。
+AI 预设在“插件 → AI 服务预设”中选择。清单不会自动连接服务或下载模型；仍需在连接设置中启用。旧版终端预设文件会被忽略并保留在原位置。
 
 ## 快捷键
 
@@ -126,17 +118,17 @@ AI 预设在“插件 → AI 服务预设”中选择；终端预设在终端下
 
 ## 结构与验证
 
-`pdfreader/engine.py` 封装 PDF 操作与历史；`documents.py` 管理独立文档会话与标签；`text_edit.py` 负责原样式编辑；`text_selection.py` 负责文字选择；`viewer.py` 管理延迟渲染与坐标换算；`layout.py`、`icons.py`、`style.py` 组织界面；`ocr.py` 是独立识别进程；`ai.py` 是唯一 HTTP 客户端；`ai_context.py` 准备全文快照和兼容文字背景；`panels.py`、`chat_markdown.py` 和 `chat_store.py` 分别负责聊天交互、原生 Markdown 和加密 SQLite；`terminal.py` 使用原生 ConPTY；`app.py` 连接操作流程。
+`pdfreader/engine.py` 封装 PDF 操作与历史；`documents.py` 管理独立文档会话与标签；`text_edit.py` 负责原样式编辑；`text_selection.py` 负责文字选择；`viewer.py` 管理延迟渲染与坐标换算；`layout.py`、`icons.py`、`style.py` 组织界面；`ocr.py` 是独立识别进程；`ai.py` 是唯一 HTTP 客户端；`ai_context.py` 准备全文快照和兼容文字背景；`panels.py`、`chat_markdown.py` 和 `chat_store.py` 分别负责聊天交互、原生 Markdown 和加密 SQLite；`app.py` 连接操作流程。
 
 ```powershell
-python -m pytest tests -q
-python main.py --smoke-test .\smoke-output
+.\.venv\Scripts\python.exe -m pytest tests -q --basetemp=work/pytest -o cache_dir=work/pytest-cache
+.\.venv\Scripts\python.exe main.py --smoke-test work/smoke-source
 ```
 
-自动化测试覆盖真实鼠标划词和复制、跨页选区、旋转、选择后高亮、实际 PDF 重开、文字移除、批注/签名、页面操作、加密、保存失败回滚、OCR 像素一致性、搜索取消、缩放锚点、终端旧事件隔离、配置迁移与 AI 流式响应。独立 smoke 测试包含实际鼠标划词、中英 OCR 后划词、保存重开、截图和终端命令回显。测试记录见 `VALIDATION.md`。
+自动化测试覆盖真实鼠标划词和复制、跨页选区、旋转、选择后高亮、实际 PDF 重开、文字移除、批注/签名、页面操作、加密、保存失败回滚、OCR 像素一致性、搜索取消、缩放锚点、配置迁移与 AI 流式响应。独立 smoke 测试包含实际鼠标划词、中英 OCR 后划词、保存重开、截图和 AI / 批注侧栏切换。测试记录见 `VALIDATION.md`。
 
 第三方真实 AI 服务未使用私人账户验证。物理打印机、不同 Windows 版本和所有 PDF 变体尚未逐项验证。
 
 ## 许可证
 
-本项目按 AGPL-3.0 发布，随包提供源码与依赖版本。第三方许可和源代码链接见 `THIRD_PARTY.md`、`licenses` 和 `assets/tessdata/LICENSE`。应用没有遥测或自动更新检查；只有 AI 的显式发送动作发起 HTTP 请求，用户启动的终端程序独立运行。
+本项目按 AGPL-3.0 发布，随包提供源码与依赖版本。第三方许可和源代码链接见 `THIRD_PARTY.md`、`licenses` 和 `assets/tessdata/LICENSE`。应用没有遥测或自动更新检查；只有 AI 的显式发送动作发起 HTTP 请求。

@@ -5,6 +5,7 @@ No network requests. Writes results only to the directory passed on the CLI.
 from pathlib import Path
 import json
 import os
+import sys
 import time
 import traceback
 
@@ -33,7 +34,6 @@ def smoke(directory):
     window.show()
     output = {"checks": [], "errors": errors, "display_scale": window.devicePixelRatioF()}
     started = time.monotonic()
-    terminal_sent = False
     stage = 0
     busy = False
     first_session = None
@@ -64,7 +64,7 @@ def smoke(directory):
         app.quit()
 
     def tick():
-        nonlocal stage, terminal_sent, busy, first_session, first_zoom
+        nonlocal stage, busy, first_session, first_zoom
         if busy:
             return
         busy = True
@@ -128,33 +128,16 @@ def smoke(directory):
                     window.toggle_left()
                 stage = 2
             elif stage == 2:
-                stage = 3
                 window.grab().save(str(root / "app.png"))
                 output["checks"].append("screenshot")
-                window.show_panel("terminal")
-                window.terminal.command.setCurrentIndex(1)
-                window.terminal.start()
-                output["terminal_start"] = {"phase": window.terminal.start_phase, "error": window.terminal.last_error,
-                    "pid": window.terminal.process.pid if window.terminal.process else None,
-                    "cwd": window.terminal.cwd}
-            elif stage == 3:
-                if window.terminal.process is None:
-                    raise RuntimeError("Terminal failed: " + window.terminal.start_phase + " / " + window.terminal.last_error + " / " + window.terminal.description.text() + "\n" + window.terminal.display.toPlainText())
-                if not terminal_sent:
-                    window.terminal.write("echo PDFREADER_TERMINAL_OK\r")
-                    terminal_sent = True
-                text = window.terminal.display.toPlainText()
-                if text.count("PDFREADER_TERMINAL_OK") >= 2:
-                    output["checks"].append("conpty_command_output")
-                    window.terminal.write("cd\r")
-                    stage = 4
-            elif stage == 4:
-                window.grab().save(str(root / "terminal.png"))
-                window.terminal.stop()
+                assert window.right.count() == 2
+                assert set(window.panel_actions) == {"ai", "comment"}
+                assert not hasattr(window, "terminal") and "pdfreader.terminal" not in sys.modules
+                output["checks"].append("terminal_removed_and_two_side_panels")
                 window.show_panel("ai")
                 window.view.goto(0)
-                stage = 5
-            elif stage == 5:
+                stage = 3
+            elif stage == 3:
                 select_phrase("划词，而后思考")
                 window.ask_selection()
                 window.grab().save(str(root / "ai.png"))
@@ -162,12 +145,12 @@ def smoke(directory):
                 if window.left.isVisible():
                     window.toggle_left()
                 window.view.clear_selection()
-                stage = 6
-            elif stage == 6:
+                stage = 4
+            elif stage == 4:
                 # Let the hidden sidebars settle before fitting and capturing.
                 window.view.fit_page()
-                stage = 7
-            elif stage == 7:
+                stage = 5
+            elif stage == 5:
                 window.grab().save(str(root / "reader.png"))
                 window.top.grab().save(str(root / "toolbar.png"))
                 window.footer.grab().save(str(root / "footer.png"))
@@ -195,11 +178,11 @@ def smoke(directory):
                 assert window.open_file(other) and len(window.sessions) == 2
                 output["checks"].append("multi_document_tabs_state_undo_and_duplicate_open")
                 window.document_tabs.setCurrentIndex(0)
-                stage = 8
-            elif stage == 8:
+                stage = 6
+            elif stage == 6:
                 window.view.fit_page()
-                stage = 9
-            elif stage == 9:
+                stage = 7
+            elif stage == 7:
                 assert abs(window.toolbar_left_space.width() - window.toolbar_right_space.width()) <= 1
                 assert window.footer.isAncestorOf(window.document_tabs)
                 assert window.top.widgetForAction(window.mode_actions["hand"]) is None

@@ -9,10 +9,7 @@ pyinstaller==6.16.0
 pyinstaller-hooks-contrib==2026.9
 PyMuPDF==1.26.7
 PySide6_Essentials==6.8.3
-pyte==0.8.2
 pytest==8.4.2
 pywin32-ctypes==0.2.3
-pywinpty==3.0.2
 setuptools==84.2.1
 shiboken6==6.8.3
-wcwidth==0.9.4
