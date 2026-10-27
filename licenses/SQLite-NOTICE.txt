@@ -1,0 +1,4 @@
+SQLite 3.53.4 is bundled through Python's sqlite3 module.
+The SQLite authors dedicate its deliverable code to the public domain.
+Official dedication and details: https://sqlite.org/copyright.html
+Upstream source: https://sqlite.org/src/

@@ -1,0 +1,6 @@
+{
+  "name": "本地 AI 命令行",
+  "kind": "terminal",
+  "command": ["ollama", "run", "请替换为本机已安装的模型名称"],
+  "description": "安装 CLI 和模型后修改此清单，再通过插件菜单导入。程序不会自动安装或下载模型。"
+}
