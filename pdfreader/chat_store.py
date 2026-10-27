@@ -55,7 +55,7 @@ class ChatStore:
         return json.loads(protect(bytes(value).decode("ascii"), decrypt=True))
 
     def save(self, key, name, state):
-        allowed = ("messages", "entries", "attachments", "input", "context", "context_version", "scroll", "pending", "document_path", "document_context")
+        allowed = ("messages", "entries", "attachments", "input", "context", "context_version", "scroll", "pending", "document_path", "document_context", "continue_from")
         payload = {field: deepcopy(state[field]) for field in allowed if field in state}
         context = payload.get("document_context")
         blob_id, encrypted_blob = None, None

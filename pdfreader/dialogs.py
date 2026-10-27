@@ -196,19 +196,24 @@ class AISettingsDialog(QDialog):
         self.remember = QCheckBox("记住密钥（Windows 当前用户加密）")
         self.remember.setChecked(config.get("remember_key", False))
         self.document_mode = QComboBox()
-        self.document_mode.addItem("PDF 文件 · 保留图表（服务需支持 PDF 输入）", "pdf")
+        self.document_mode.addItem("完整文档 · 保留图表，自动适配 DeepSeek", "pdf")
         self.document_mode.addItem("全文文字 · 兼容模式", "text")
         self.document_mode.setCurrentIndex(1 if config.get("document_mode") == "text" else 0)
+        self.output_limit = QComboBox()
+        for label, value in (("模型默认", 0), ("8,192 token", 8192), ("16,384 token", 16384), ("32,768 token", 32768), ("65,536 token", 65536)):
+            self.output_limit.addItem(label, value)
+        self.output_limit.setCurrentIndex(max(0, self.output_limit.findData(config.get("max_output_tokens", 0))))
         self.online = QCheckBox("允许 AI 向上述服务发送消息及附加的 PDF、截图和文字")
         self.online.setChecked(config.get("enabled", False))
         form.addRow("API Base URL", self.endpoint)
         form.addRow("模型", self.model)
         form.addRow("API Key", self.key)
         form.addRow("文档背景", self.document_mode)
+        form.addRow("输出上限", self.output_limit)
         layout.addLayout(form)
         layout.addWidget(self.remember)
         layout.addWidget(self.online)
-        note = QLabel("新对话默认附加全文、当前页截图和选区。点击发送才请求服务，＋ 可调整范围。每轮携带全文背景和最近会话，可能增加服务用量。\n\nPDF 不受支持时可改用全文文字；其他页面的图表不会包含在文字中。截图需要支持图片的模型。\n\n聊天和文档背景加密保存在本机，密钥不写入聊天记录。远程服务的数据保存和使用方式取决于其政策。")
+        note = QLabel("新对话默认附加全文、当前页截图和选区。点击发送才请求服务，＋ 可调整范围。每轮携带全文背景和最近会话，可能增加服务用量。\n\nDeepSeek：整份 PDF 在本机转换为逐页文字与图片。其他服务使用原生 PDF 输入，不支持时可改用全文文字。截图需要支持图片的模型。\n\n聊天和文档背景加密保存在本机，密钥不写入聊天记录。远程服务的数据保存和使用方式取决于其政策。")
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch()
@@ -222,4 +227,5 @@ class AISettingsDialog(QDialog):
     def values(self):
         return {"endpoint": self.endpoint.text().strip(), "model": self.model.text().strip(),
                 "key": self.key.text().strip(), "remember_key": self.remember.isChecked(),
-                "enabled": self.online.isChecked(), "document_mode": self.document_mode.currentData()}
+                "enabled": self.online.isChecked(), "document_mode": self.document_mode.currentData(),
+                "max_output_tokens": self.output_limit.currentData()}

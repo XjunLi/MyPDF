@@ -1,9 +1,9 @@
 {
-  "version": "0.6.1",
-  "date": "2026-10-27",
+  "version": "0.6.2",
+  "date": "2026-10-28",
   "platform": "Windows 11 x64 build 26200",
   "python": "3.12.14",
-  "unit_tests_passed": 141,
+  "unit_tests_passed": 165,
   "errors": [],
   "source_checks": [
     "open_sample",
@@ -26,6 +26,8 @@
     "ai_full_pdf_current_page_and_selection",
     "sqlite_full_document_encrypted_and_deduplicated",
     "ai_full_text_compatibility_with_current_page",
+    "deepseek_all_pages_real_process_and_background_stream",
+    "ai_model_default_output_limit_and_gui_heartbeat",
     "centered_toolbar_and_close_tabs_to_welcome",
     "close_and_cleanup"
   ],
@@ -51,16 +53,66 @@
     "ai_full_pdf_current_page_and_selection",
     "sqlite_full_document_encrypted_and_deduplicated",
     "ai_full_text_compatibility_with_current_page",
+    "deepseek_all_pages_real_process_and_background_stream",
+    "ai_model_default_output_limit_and_gui_heartbeat",
     "centered_toolbar_and_close_tabs_to_welcome",
     "close_and_cleanup"
   ],
   "packaged_ok": true,
   "packaged_display_scale": 1.5,
+  "rendering_validation": {
+    "tile_reference_pixel_tests": true,
+    "rotation_tests_degrees": [
+      0,
+      90
+    ],
+    "physical_scales": [
+      1,
+      1.25,
+      1.875,
+      3,
+      6,
+      7.5
+    ],
+    "subpixel_phase_and_tile_boundaries": true,
+    "logical_dpi_zoom_mapping": true,
+    "raster_cache_budget_bytes": 67108864,
+    "independent_reference": "Poppler and native MuPDF; embedded CFF mathematics and CJK fonts"
+  },
+  "local_document_validation": {
+    "pages": 17,
+    "original_unchanged": true,
+    "source_ok": true,
+    "packaged_ok": true,
+    "inspected_zoom": [
+      1,
+      1.25,
+      4,
+      5
+    ],
+    "request": {
+      "background_images": 17,
+      "file_parts": 0,
+      "request_bytes": 5276965,
+      "max_tokens_sent": false
+    },
+    "source_gui_ticks": 154,
+    "packaged_gui_ticks": 149,
+    "source_max_gui_gap_ms": 422,
+    "packaged_max_gui_gap_ms": 407,
+    "private_document_data_committed": false
+  },
+  "ai_transport_validation": [
+    "Real worker threads and GUI-affine QObject receivers",
+    "Real QProcess attachment conversion in source and frozen builds",
+    "Loopback HTTP server: UTF-8 streaming, reasoning, length completion, EOF, timeout, cancellation and HTTP 400",
+    "Long Markdown response, partial answer retention, explicit continuation and encrypted SQLite restore",
+    "Cancellation during attachment preparation and request serialization"
+  ],
+  "ai_service_validation": "Local loopback and simulated HTTP only; no real API keys or external AI services used",
   "terminal_loaded": false,
   "terminal_dependencies_bundled": false,
-  "sqlite_version": "3.53.4",
   "private_payload_encryption": "Windows current-user DPAPI",
-  "ai_service_validation": "In-process simulated HTTP responses; no private keys or external AI services used",
   "development_directory": "E:\\MyPDF",
   "build_directory": "dist/PDF Reader",
   "version_control": "Git commits and annotated version tags",

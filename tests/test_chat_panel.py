@@ -33,6 +33,7 @@ def reader(qapp, pdf_path, tmp_path, monkeypatch):
     monkeypatch.setenv("PDFREADER_DATA_DIR", str(tmp_path / "settings"))
     monkeypatch.setattr("pdfreader.panels.AIJob", FakeJob)
     window = MainWindow()
+    window.ai.preparation_provider = None
     window.setStyleSheet(STYLE)
     window.auto_ocr.setChecked(False)
     window.open_file(pdf_path)

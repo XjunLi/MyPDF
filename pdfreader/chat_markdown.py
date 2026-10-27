@@ -1,6 +1,7 @@
 """Native, offline Markdown rendering. No WebEngine, scripts or remote images."""
 import html
 import re
+from functools import lru_cache
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFont, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
@@ -12,6 +13,7 @@ class PrivateDocument(QTextDocument):
         return QByteArray()
 
 
+@lru_cache(maxsize=64)
 def markdown_html(text):
     document = PrivateDocument()
     document.setDefaultFont(QFont("Microsoft YaHei UI", 10))

@@ -26,6 +26,14 @@ python -m venv .venv
 
 `build.ps1` 默认安装锁定依赖、运行全部测试，再生成 `dist/PDF Reader/PDF Reader.exe`。已有依赖时可用 `-SkipInstall`。所有构建、缓存及测试结果均位于忽略目录中；不会新增 `0.x.y` 源码副本。
 
+原始文档的本地只读回归（也支持打包后的 EXE）：
+
+```powershell
+.\.venv\Scripts\python.exe main.py --inspect-pdf 'D:\Documents\sample.pdf' work/inspect-source
+```
+
+此命令使用独立设置、模拟 HTTP 响应，记录缩放截图、完整页面转换、GUI 计时和原文件未变更检查；不使用用户配置、密钥或外部 AI。结果保持在 `work/`，不要提交用户文档或这些截图。
+
 ## Git 工作流程
 
 - `main` 保留可运行版本；每个独立改动做一次清晰的提交。

@@ -263,7 +263,7 @@ class ReaderLayout:
         self.right.setMinimumWidth(300)
         self.right.setMaximumWidth(600)
         self.right.setIconSize(QSize(18, 18))
-        self.ai = AIPanel(self.settings, self.ai_context, image_provider=self.ai_page_image,
+        self.ai = AIPanel(self.settings, self.ai_context, image_provider=self.ai_page_image, preparation_provider=self.prepare_ai_attachment,
                           document_provider=self.ai_document_context, document_info=self.ai_document_info)
         self.ai.historyOpenRequested.connect(self.open_ai_history)
         self.right.addTab(self.ai, icon("ai"), "AI")

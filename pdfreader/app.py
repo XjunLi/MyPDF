@@ -406,12 +406,27 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
     def ai_page_image(self):
         if not self.document.count:
             return None
-        page = self.document.doc[self.view.current_page]
-        # Render just the PDF page, including edits and annotations. No desktop
-        # capture, temporary image file, or access to any other document.
-        scale = min(2, 1600 / max(page.rect.width, page.rect.height))
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csRGB, alpha=False, annots=True)
-        return {"png": pixmap.tobytes("png"), "label": f"第 {self.view.current_page + 1} 页 · 图片"}
+        from .ai_context import page_image
+        return {"png": page_image(self.document.doc[self.view.current_page]),
+                "label": f"第 {self.view.current_page + 1} 页 · 图片"}
+
+    def prepare_ai_attachment(self, mode):
+        from .ai_preparation import AttachmentJob
+        if not self.document.count:
+            raise ValueError("请先打开 PDF，或通过 ＋ 选择不附加信息。")
+        if not (self.document.doc.permissions & fitz.PDF_PERM_COPY):
+            raise ValueError("此 PDF 限制了内容提取，无法附加给 AI。")
+        info = self.ai_document_info()
+        info.update(mode=mode, label_page=self.view.current_page, page=self.view.current_page if mode else 0)
+        # Take an uncompressed snapshot on the owner thread. Font interpretation,
+        # rasterization and compression then happen in a separate process.
+        if mode:
+            raw = self.document.doc.tobytes(encryption=fitz.PDF_ENCRYPT_NONE, no_new_id=True)
+        else:
+            with fitz.open() as page_doc:
+                page_doc.insert_pdf(self.document.doc, from_page=self.view.current_page, to_page=self.view.current_page)
+                raw = page_doc.tobytes()
+        return AttachmentJob(raw, info, self.ai)
 
     def ai_document_info(self):
         return {"pages": self.document.count, "name": self.active_session.name if self.active_session else "",
@@ -853,7 +868,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 "编辑：加文字/插图先拖框；改文字点击文字行或拖框。默认保留原字体、字号和颜色；无法匹配原字体时会提示。复杂排版不会自动重排。\n\n"
                 "签名：拖出放置框后手写。保存的是可见笔迹，不是证书数字签名。\n\n"
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
-                "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；PDF 不受支持时可在设置中改用全文文字。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
+                "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；DeepSeek 自动将 PDF 转为逐页文字与图片；其他服务不支持 PDF 时可改用全文文字。被截断的回答可点击继续。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
                 "聊天记录：SQLite 自动保存到本机，Windows 当前用户加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"
                 "范围：本版本提供主要阅读与编辑流程。暂不包含证书签章、PDF/A 校验、XFA、专业印前处理及 Word 排版转换。")
         QMessageBox.information(self, "使用说明", text)

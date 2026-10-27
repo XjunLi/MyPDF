@@ -85,7 +85,7 @@ class DocumentTabs:
         view.scroll_timer.stop()
         # Rendered pages can be large at high DPI; keep document and selection,
         # but let inactive tabs release their disposable bitmap cache.
-        view.cache.clear()
+        view.renderer.clear()
         session.search_text = self.search_input.text()
         session.search_visible = not self.search_bar.isHidden()
         session.search_results = list(self.search_results)

@@ -2,9 +2,10 @@ from collections import OrderedDict
 import math
 import pymupdf as fitz
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QTransform
+from PySide6.QtGui import QColor, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QApplication, QMenu
 from .text_selection import TextPage, distance_to_rect
+from .rendering import PageRenderer
 
 TEXT_TOOLS = {"select"}
 
@@ -16,6 +17,7 @@ def qrect(rect):
 class PageItem(QGraphicsItem):
     def __init__(self, viewer, number):
         super().__init__()
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemUsesExtendedStyleOption)
         self.viewer, self.number = viewer, number
         self.size = qrect(viewer.document.doc[number].rect)
 
@@ -26,7 +28,8 @@ class PageItem(QGraphicsItem):
         painter.fillRect(self.size.translated(1.5, 2.5), QColor("#d9dce0"))
         painter.fillRect(self.size, Qt.GlobalColor.white)
         try:
-            painter.drawImage(self.size, self.viewer.page_image(self.number))
+            area = option.exposedRect.intersected(self.size)
+            self.viewer.renderer.paint(painter, self.number, (area.left(), area.top(), area.right(), area.bottom()))
         except Exception as exc:
             painter.setPen(QColor("#a03e3e"))
             painter.drawText(self.size.adjusted(24, 24, -24, -24), Qt.TextFlag.TextWordWrap, str(exc))
@@ -81,8 +84,10 @@ class PdfView(QGraphicsView):
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.mode, self.zoom, self.current_page = "select", 1.0, 0
+        self.points_to_pixels = self.logicalDpiX() / 72.0
         self.items_by_page = []
-        self.cache, self.text_cache = OrderedDict(), OrderedDict()
+        self.renderer = PageRenderer(document)
+        self.text_cache = OrderedDict()
         self.text_boxes, self.search_boxes = {}, {}
         self.selected_text = ""
         self.text_anchor = self.text_focus = self.selection = None
@@ -114,7 +119,7 @@ class PdfView(QGraphicsView):
         offset = center - self.items_by_page[number].pos() if keep_position and number < len(self.items_by_page) else None
         self.rebuilding = True
         self.scroll_timer.stop()
-        self.cache.clear()
+        self.renderer.clear()
         self.text_cache.clear()
         self.clear_selection()
         self.dragging_text = False
@@ -145,21 +150,6 @@ class PdfView(QGraphicsView):
         self.rebuilding = False
         self.pageChanged.emit(number)
 
-    def page_image(self, page):
-        scale = round(self.zoom * self.devicePixelRatioF(), 2)
-        key = (self.document.revision, page, scale)
-        if key in self.cache:
-            self.cache.move_to_end(key)
-            return self.cache[key]
-        p = self.document.doc[page]
-        render_scale = min(scale, math.sqrt(8_000_000 / (p.rect.width * p.rect.height)))
-        pix = p.get_pixmap(matrix=fitz.Matrix(render_scale, render_scale), colorspace=fitz.csRGB, alpha=False)
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
-        self.cache[key] = img
-        while len(self.cache) > 6:
-            self.cache.popitem(last=False)
-        return img
-
     def text_page(self, number):
         key = self.document.revision, number
         if key not in self.text_cache:
@@ -185,20 +175,21 @@ class PdfView(QGraphicsView):
         if manual:
             self.fit_mode = False
             self.resize_timer.stop()
-        self.setTransform(QTransform.fromScale(self.zoom, self.zoom))
+        display_zoom = self.zoom * self.points_to_pixels
+        self.setTransform(QTransform.fromScale(display_zoom, display_zoom))
         center = self.viewport().rect().center()
-        self.centerOn(before + QPointF((center.x() - anchor.x()) / self.zoom, (center.y() - anchor.y()) / self.zoom))
+        self.centerOn(before + QPointF((center.x() - anchor.x()) / display_zoom, (center.y() - anchor.y()) / display_zoom))
         self.zoomChanged.emit(self.zoom)
         self.viewport().update()
 
     def fit_width(self):
         if self.document.count:
-            self.set_zoom((self.viewport().width() - 4) / self.scene_obj.sceneRect().width(), manual=False)
+            self.set_zoom((self.viewport().width() - 4) / self.scene_obj.sceneRect().width() / self.points_to_pixels, manual=False)
 
     def fit_page(self):
         if self.document.count:
             rect = self.document.doc[self.current_page].rect
-            self.set_zoom(min((self.viewport().width() - 64) / rect.width, (self.viewport().height() - 48) / rect.height))
+            self.set_zoom(min((self.viewport().width() - 64) / rect.width, (self.viewport().height() - 48) / rect.height) / self.points_to_pixels)
             self.goto(self.current_page)
 
     def resizeEvent(self, event):
