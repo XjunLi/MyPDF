@@ -23,7 +23,8 @@ def exercise_editing(window,root,output):
         return {"widget_dpi":widget.logicalDpiY(),"layout_dpi":paint.logicalDpiY() if paint else None,
                 "font_pt":widget.document().defaultFont().pointSizeF(),"family":widget.document().defaultFont().family(),"width":widget.width(),"height":widget.height(),
                 "wrapped_lines":widget.document().firstBlock().layout().lineCount(),
-                "vertical_scroll":widget.verticalScrollBar().maximum()}
+                "vertical_scroll":widget.verticalScrollBar().maximum(),
+                "typing_font_pt":widget.currentCharFormat().fontPointSize(),"typing_family":widget.currentCharFormat().font().family()}
     def click(point):
         page=window.document.doc[0]
         local=fitz.Point(point)*page.rotation_matrix

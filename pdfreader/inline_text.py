@@ -48,7 +48,7 @@ class InlineTextEditor(QObject):
         self.angle=0; self.background_document=None; self.background_renderer=None
         self.font_job=None; self.font_attempts=set(); self.native_families={}; self.preview_fonts=OrderedDict()
         self.settings=getattr(view.window(),"settings",None)
-        self.updating=False; self.modal=False; self.disposed=False; self.error=""
+        self.updating=False; self.modal=False; self.disposed=False; self.error=""; self.preview_style=None
         self.fontname="native" if region else "library:sans-sc"
         self.color=QColor(region.primary_style.color) if region else QColor("#141f2e"); self.drag=None
         self.input=TextInput(); self.input.owner=self
@@ -246,13 +246,34 @@ class InlineTextEditor(QObject):
             font=QFont(family); font.setKerning(False)
             font.setPointSizeF(self.size.value()*72/self.input.logicalDpiY())
             if self.fontname!="native": font.setBold(bool(library_face(self.fontname[8:]).flags.get("bold")))
-            self.input.setStyleSheet("QPlainTextEdit#inlinePdfText {background:transparent;border:0;padding:0;color:"+self.color.name()+";}")
-            self.input.setFont(font); self.input.document().setDefaultFont(font)
+            style=(family,self.size.value(),self.color.name(),font.bold())
+            if style!=self.preview_style:
+                self.preview_style=style
+                safe_family=family.replace("'","")
+                self.input.setStyleSheet("QPlainTextEdit#inlinePdfText {background:transparent;border:0;padding:0;color:"+self.color.name()+";font-family:'"+safe_family+"';font-size:"+f"{self.size.value():g}"+"px;}")
+                self.input.setFont(font); self.input.document().setDefaultFont(font)
+                if not self.region:
+                    # An inherited widget format can override QTextDocument's
+                    # default font on Cocoa. Set the typing format explicitly.
+                    self.input.blockSignals(True)
+                    previous=self.input.textCursor(); cursor=self.input.textCursor()
+                    fmt=QTextCharFormat(); fmt.setFont(font); fmt.setForeground(self.color)
+                    if self.input.toPlainText():
+                        cursor.select(QTextCursor.SelectionType.Document); cursor.setCharFormat(fmt)
+                        self.input.setTextCursor(previous)
+                    self.input.setCurrentCharFormat(fmt)
+                    self.input.blockSignals(False)
             self.input.document().setDocumentMargin(self.margin)
+            if not self.region:
+                metrics=QFontMetricsF(font,self.input)
+                native_width=max((metrics.horizontalAdvance(line) for line in self.input.toPlainText().replace("\t","    ").split("\n")),default=0)+self.margin*2+2
+                width=min(maxwidth,max(width,native_width))
             self.input.setFixedWidth(math.ceil(width))
-            if self.region:
-                height=max(self.region.rect[3]-self.region.rect[1],self.input.document().size().height()*QFontMetricsF(self.input.document().defaultFont(),self.input).lineSpacing()+2)
-            else: height=self.layout.height
+            block=self.input.document().begin(); native_height=self.margin*2
+            while block.isValid():
+                native_height+=self.input.document().documentLayout().blockBoundingRect(block).height()
+                block=block.next()
+            height=max(self.region.rect[3]-self.region.rect[1] if self.region else self.layout.height,native_height)
             self.body_width=width; self.body_height=max(16,min(math.ceil(height)+2,self.available_height))
             self.position()
         except (ValueError,RuntimeError) as exc:

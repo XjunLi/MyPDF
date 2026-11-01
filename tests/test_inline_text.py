@@ -53,6 +53,7 @@ def test_inserted_unicode_is_horizontal_on_screen_and_subsetted(document,tmp_pat
 
 def test_single_click_typing_grows_ime_zoom_save_and_one_undo(reader,tmp_path,qapp):
     editor=place(reader)
+    assert editor.input.currentCharFormat().fontPointSize()*editor.input.logicalDpiY()/72==pytest.approx(12)
     initial=editor.body_width,editor.body_height
     QTest.keyClicks(editor.input,"A simple note ")
     event=QInputMethodEvent(); event.setCommitString("中文 ∇")

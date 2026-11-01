@@ -102,3 +102,6 @@ STYLE = STYLE.replace("ASSET_ROOT", (resource_root() / "assets").as_posix())
 if sys.platform == "darwin":
     STYLE = STYLE.replace("'Microsoft YaHei UI','Segoe UI'", "'PingFang SC','Helvetica Neue'")
     STYLE = STYLE.replace("'Segoe UI'", "'Helvetica Neue'")
+
+if sys.platform == "darwin":
+    STYLE = STYLE.replace("'Microsoft YaHei UI','Segoe UI'", "'PingFang SC','Helvetica Neue'")
