@@ -105,10 +105,10 @@ def test_selection_attachment_and_missing_selection_are_explicit(reader, monkeyp
     assert ai.attachments["0"]["text"] == "The selected phrase"
 
 
-def test_persistent_draft_after_tab_close_and_restart(reader, pdf_path, qapp):
+def test_persistent_draft_after_tab_close_and_restart(reader, pdf_path, qapp, qt_wait):
     ai = reader.ai
     ai.input.setPlainText("Remember this draft")
-    QTest.qWait(740)
+    qt_wait(lambda: bool(ai.conversation_id))
     identity = ai.conversation_id
     assert identity and ai.store.load(identity)["input"] == "Remember this draft"
     assert reader.close_document()

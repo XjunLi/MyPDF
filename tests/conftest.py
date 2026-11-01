@@ -43,3 +43,17 @@ def qapp():
     app.setStyle("Fusion")
     prepare_fonts(app)
     yield app
+
+
+@pytest.fixture
+def qt_wait(qapp):
+    """Wait for a GUI outcome; timer deadlines are not real-time guarantees."""
+    def until(predicate,timeout=3000):
+        from PySide6.QtCore import QElapsedTimer
+        from PySide6.QtTest import QTest
+        timer=QElapsedTimer(); timer.start()
+        while not predicate() and timer.elapsed()<timeout:
+            QTest.qWait(10)
+        qapp.processEvents()
+        assert predicate(),"Expected GUI state was not reached"
+    return until

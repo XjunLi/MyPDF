@@ -73,7 +73,7 @@ def test_dpapi_key_roundtrip():
     assert protect(encrypted, decrypt=True) == secret
 
 
-def test_search_cancels_old_batches_when_query_or_document_changes(qapp, pdf_path, tmp_path, monkeypatch):
+def test_search_cancels_old_batches_when_query_or_document_changes(qapp, pdf_path, tmp_path, monkeypatch, qt_wait):
     monkeypatch.setenv("PDFREADER_DATA_DIR", str(tmp_path / "settings"))
     from pdfreader.app import MainWindow
     window = MainWindow()
@@ -88,7 +88,7 @@ def test_search_cancels_old_batches_when_query_or_document_changes(qapp, pdf_pat
     assert len(window.search_results) < 30
     window.search_input.setText("new-query")
     window.search()
-    QTest.qWait(50)
+    qt_wait(lambda: not window.search_running)
     assert len(window.search_results) == 30
     assert window.search_query == "new-query"
     window.search_input.setText("old-query")
@@ -98,7 +98,7 @@ def test_search_cancels_old_batches_when_query_or_document_changes(qapp, pdf_pat
     other_path = tmp_path / "another.pdf"
     other_path.write_bytes(pdf_path.read_bytes())
     window.open_file(str(other_path))
-    QTest.qWait(50)
+    qt_wait(lambda: not window.search_running)
     assert not window.search_results
     assert not window.view.search_boxes
     window.close()
