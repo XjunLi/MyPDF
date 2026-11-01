@@ -8,3 +8,6 @@
 *.pdf binary
 *.ico binary
 *.traineddata binary
+*.sh text eol=lf
+*.yml text eol=lf
+*.spec text eol=lf

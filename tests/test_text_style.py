@@ -82,6 +82,8 @@ def test_overflow_or_missing_font_glyph_preserves_document(tmp_path):
 def test_embedded_font_is_reused_for_replacement(tmp_path):
     font_path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arial.ttf"
     if not font_path.exists():
+        font_path = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
+    if not font_path.exists():
         pytest.skip("Arial font file not available")
     pdf = fitz.open()
     page = pdf.new_page()

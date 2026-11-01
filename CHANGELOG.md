@@ -1,3 +1,13 @@
+# PDF Reader 0.7.0
+
+2026-11-01
+
+- 增加 macOS 15+ 的 Apple Silicon 原生应用包，随包内置 PDF 引擎、Qt 和中英 OCR 模型。
+- macOS 使用钥匙串中的随机密钥及 AES-256-GCM 加密聊天和已记住的 API Key；Windows DPAPI 格式与既有记录保持兼容。密钥不可用时明确失败，不写入明文。
+- 采用 macOS 标准应用数据目录、系统中文字体和 Command 快捷键提示；接收 Finder / Dock 的 PDF 文件打开事件。
+- 增加多尺寸矢量生成的 Mac 图标、PDF 文件关联和原生构建流程；修复无控制台环境下 OCR 进程的标准输出处理。
+- GitHub Actions 分别验证 Windows x64 和 macOS arm64；版本标签通过全部构建后发布 ZIP、源码、SHA256 与验证记录。README 提供分平台下载、安装、源码运行和构建入口，并说明 Mac 签名状态。
+
 # PDF Reader 0.6.2
 
 2026-10-28

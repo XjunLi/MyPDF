@@ -1,35 +1,8 @@
 from pathlib import Path
-import base64
-import ctypes
 import json
 import os
-from ctypes import wintypes
 from .paths import data_root, legacy_data_root
-
-
-class Blob(ctypes.Structure):
-    _fields_ = [("length", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_ubyte))]
-
-
-def protect(value, decrypt=False):
-    if os.name != "nt":
-        raise RuntimeError("本机加密保存目前仅支持 Windows。")
-    raw = base64.b64decode(value) if decrypt else value.encode("utf-8")
-    buf = ctypes.create_string_buffer(raw)
-    source = Blob(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)))
-    target = Blob()
-    crypt = ctypes.windll.crypt32
-    if decrypt:
-        success = crypt.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 1, ctypes.byref(target))
-    else:
-        success = crypt.CryptProtectData(ctypes.byref(source), "PDF Reader private data", None, None, None, 1, ctypes.byref(target))
-    if not success:
-        raise ctypes.WinError()
-    try:
-        result = ctypes.string_at(target.data, target.length)
-        return result.decode("utf-8") if decrypt else base64.b64encode(result).decode("ascii")
-    finally:
-        ctypes.windll.kernel32.LocalFree(target.data)
+from .privacy import protect
 
 
 class Settings:

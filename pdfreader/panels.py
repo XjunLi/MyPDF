@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QDialogButtonBox, QFileDialog, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QTabWidget)
 
 from .ai import AIJob, validate_endpoint, history_for_request
+from .application import shortcut_text
 from .chat_markdown import ChatView, markdown_html
 from .chat_store import ChatStore, document_key
 from .ai_context import background_message, document_mode
@@ -163,7 +164,7 @@ class AIPanel(QWidget):
         self.cancel_button = icon_button("stop", "停止生成", self.cancel)
         self.cancel_button.hide()
         row.addWidget(self.cancel_button)
-        self.send_button = icon_button("send", "发送 · Ctrl+Enter", self.send)
+        self.send_button = icon_button("send", "发送 · " + shortcut_text("Ctrl+Return"), self.send)
         self.send_button.setObjectName("chatSend")
         row.addWidget(self.send_button)
         composer.addLayout(row)
@@ -343,7 +344,7 @@ class AIPanel(QWidget):
         if self.job or self.preparation:
             self.update_request_status()
         else:
-            self.save_status.setText("本机记录保存失败" if self.storage_error else "本机加密保存 · Ctrl + Enter 发送")
+            self.save_status.setText("本机记录保存失败" if self.storage_error else "本机加密保存 · " + shortcut_text("Ctrl+Return") + " 发送")
         self.save_status.setToolTip((self.storage_error + "\n可先从对话选项导出 Markdown。") if self.storage_error else
             "聊天、草稿和全文背景在本机 SQLite 中加密保存。\n自动模式每次发送全文背景、当前页图片、有选区时附选中文字。\n打开 PDF、翻页和划词仅更新待发送内容；点击发送时请求服务。")
 

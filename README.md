@@ -1,16 +1,60 @@
-# PDF Reader 0.6.2
+# PDF Reader 0.7.0
 
-一个面向 Windows 的极简 PDF 阅读器。工具居中放在顶部，页码和缩放在底部，页面、AI 和批注侧栏按需展开。阅读、编辑、批注、手写签名和中英 OCR 均在本地完成。
+一个面向 Windows 和 macOS 的极简 PDF 阅读器。工具居中放在顶部，页码和缩放在底部，页面、AI 和批注侧栏按需展开。阅读、编辑、批注、手写签名和中英 OCR 均在本地完成。
 
-0.6.2 修复 PDF 高 DPI 显示、DeepSeek 文档输入和长回答中断：页面按可见区域以实际屏幕分辨率渲染；DeepSeek 自动接收完整文档的逐页文字与图片；回复使用模型默认输出额度，并显示截断、超时和续写。终端保持停用。底部标签、居中工具栏、原样式编辑、自动 OCR、Markdown 对话及本机加密 SQLite 记录保留。完整改动见 `CHANGELOG.md`。
+0.7.0 增加 Apple Silicon Mac 原生应用、macOS 钥匙串加密、Finder 打开 PDF 和自动发布流程。高 DPI 分块渲染、DeepSeek 全文图文附件、Markdown 对话、自动 OCR 和多文档标签继续保留。完整改动见 [CHANGELOG.md](CHANGELOG.md)。
 
-## 运行
+## 下载与运行
 
-**免安装版：**解压完整的 `PDFReader-Windows-x64.zip`，打开 `PDFReader` 文件夹，双击 `PDF Reader.exe`。请保留旁边的 `_internal` 文件夹。PDF 引擎、Qt 运行库、中英文 OCR 模型均已附带，无需 Python、Tesseract 安装或联网下载。
+| 使用方式 | 下载入口 | 启动路径 |
+| --- | --- | --- |
+| Windows 10/11 · x64 | [Windows ZIP](https://github.com/XjunLi/MyPDF/releases/latest/download/PDFReader-Windows-x64.zip) | 完整解压后打开 `PDFReader/PDF Reader.exe` |
+| macOS 15+ · Apple Silicon（M 系列） | [Mac arm64 ZIP](https://github.com/XjunLi/MyPDF/releases/latest/download/PDFReader-macOS-arm64.zip) | 解压，将 `PDF Reader.app` 拖入“应用程序”，双击启动 |
+| 源码运行 / 自行构建 | [源码 ZIP](https://github.com/XjunLi/MyPDF/releases/latest/download/PDFReader-source.zip) · [Git 仓库](https://github.com/XjunLi/MyPDF) | 见下方源码命令及 [开发说明](DEVELOPMENT.md) |
 
-**系统：**目前仅支持 Windows 10/11 x64；macOS 尚未适配，Windows 可执行文件不能在 Mac 原生运行。启动后点击“试读示例”，即可体验包含文字页、扫描页和签名区域的示例文档。打开对话框可多选文件，也可一次拖入多份 PDF；命令行支持多个路径，如 `& '.\PDF Reader.exe' 'D:\Documents\a.pdf' 'D:\Documents\b.pdf'`。
+[全部版本与验证结果](https://github.com/XjunLi/MyPDF/releases) · [SHA256 校验清单](https://github.com/XjunLi/MyPDF/releases/latest/download/SHA256SUMS.txt) · [构建状态](https://github.com/XjunLi/MyPDF/actions/workflows/build.yml)
 
-**源码：**Python 3.12，执行 `python -m pip install -r requirements.txt`，然后 `python main.py`。依赖安装需要联网，安装后的阅读、编辑和 OCR 不需要联网。`build.ps1` 可运行测试并重新打包。固定目录与 Git 版本流程见 [开发说明](DEVELOPMENT.md)。
+### Windows
+
+请保留 EXE 旁边的 `_internal` 文件夹，不能只复制 EXE。升级时退出旧版本，完整解压新包；本机设置和聊天记录保留在 `%LOCALAPPDATA%/PDFReader`。PDF 引擎、Qt 和中英 OCR 模型随包附带，免安装 Python / Tesseract，首次阅读也无需下载模型。
+
+本项目原开发机的固定构建路径为 `E:\MyPDF\dist\PDF Reader\PDF Reader.exe`；其他电脑使用自己的解压位置。
+
+### macOS
+
+Mac 版本适用于 Apple Silicon（M 系列），本次不提供 Intel 包。应用完整路径通常为 `/Applications/PDF Reader.app`，支持将 PDF 拖到窗口或 Dock 图标，也可在 Finder 使用“打开方式 → PDF Reader”。常用快捷键使用 **⌘**：打开 ⌘O、保存 ⌘S、复制 ⌘C、搜索 ⌘F、发送 ⌘Return；文中 Ctrl 快捷键在 Mac 对应 ⌘。
+
+当前 Mac 包采用 ad-hoc 签名，**尚未经过 Apple Developer ID 签名与公证**。首次打开可能被系统拦截；确认下载来自本仓库后，可按 [Apple 官方说明](https://support.apple.com/en-us/102445) 在“系统设置 → 隐私与安全性 → 仍要打开”允许该应用。无需关闭 Gatekeeper。
+
+聊天和设置存于 `~/Library/Application Support/PDFReader/`。加密密钥保存在本机钥匙串，首次使用可能需要允许访问；钥匙串不可用时会报告保存失败，不会改为明文保存。Windows 的 DPAPI 数据库不能直接移植到 Mac；换系统前可在原应用导出 Markdown。
+
+### 从源码运行
+
+需要 Python 3.12。安装依赖需要联网，之后 PDF 功能离线运行。
+
+Windows（PowerShell）：
+
+```powershell
+git clone https://github.com/XjunLi/MyPDF.git
+Set-Location MyPDF
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+macOS（终端）：
+
+```bash
+git clone https://github.com/XjunLi/MyPDF.git
+cd MyPDF
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+自行打包：Windows 执行 `./build.ps1`；Mac 执行 `bash build-macos.sh`。Mac 应用必须在 Mac 构建；Apple Silicon 包由 GitHub 的原生 arm64 macOS runner 构建并测试。发布包、源码和每个平台的验证 JSON 都放在 GitHub Releases，只有全部构建通过后才发布。
+
+启动后点击“试读示例”，可体验文字、扫描页和签名区域。打开对话框可多选文件，也可一次拖入多份 PDF。
 
 ## 已实现功能
 
@@ -68,23 +112,23 @@ OCR 运行在独立进程，阅读界面可以继续使用；修改内容会取�
 10. 输出上限默认使用模型自身的设置，可在 AI 设置中指定。达到长度限制时会保留正文、说明原因并显示“继续”，仅在你点击时发送续写请求。思考、等待和接收阶段显示耗时；断线、超时不会伪装成完整回答。
 11. AI 回复显示 Markdown，不执行命令、不修改 PDF。Markdown 内的图片、远程资源和原始 HTML 被禁用；点击网页链接仅提供复制选项。**… → 复制最近回答** 保留原始 Markdown。
 
-本软件不提供 AI 账户、额度或大模型权重。真实服务需要你自己的配置。API 密钥默认仅保存在内存；选择“记住密钥”后使用 Windows DPAPI 按当前用户加密。密钥只用于向配置的服务鉴权，不写入聊天数据库；应用没有开发者中转服务。联网请求中的问题、历史和所选附件会交给服务提供方，其保存、训练或日志政策取决于该服务。此处的本机加密不代表服务端保密。
+本软件不提供 AI 账户、额度或大模型权重。真实服务需要你自己的配置。API 密钥默认仅保存在内存；选择“记住密钥”后，Windows 使用当前用户的 DPAPI，macOS 使用钥匙串中的随机密钥及 AES-256-GCM 加密。密钥只用于向配置的服务鉴权，不写入聊天数据库；应用没有开发者中转服务。联网请求中的问题、历史和所选附件会交给服务提供方，其保存、训练或日志政策取决于该服务。此处的本机加密不代表服务端保密。
 
 ## 保存聊天记录
 
 从 0.5.0 起，记录自动保存，无需另装数据库、注册账号或手动保存聊天。
 
-- 数据库位于 `%LOCALAPPDATA%\PDFReader\chat-history.sqlite3`。正文、草稿、附件、全文背景、标题及文件路径经 Windows 当前用户加密后才写入 SQLite；时间、记录 ID、文档路径哈希和背景内容哈希作为索引。运行时可能同时存在 `-wal`、`-shm` 文件。
+- 数据库位于上述系统数据目录的 `chat-history.sqlite3`。正文、草稿、附件、全文背景、标题及文件路径在本机加密后才写入 SQLite；时间、记录 ID、文档路径哈希和背景内容哈希作为索引。运行时可能同时存在 `-wal`、`-shm` 文件。
 - 全文背景单独加密保存，相同内容在多个会话中复用；输入草稿和流式回复不会反复写入整份 PDF。每段会话保留最近使用的文档背景，旧轮次保留当时的页面截图、选区和背景说明；不归档每次修改的完整 PDF。删除最后一个引用后回收该背景数据。
 - 草稿停止输入约 0.7 秒后保存；发送、回复完成、切换文档和退出时保存。流式回复途中也会保存部分内容；意外中断后保留已落盘部分。PDF 原文件仍需要你点击保存。
 - 同一路径的 PDF 重新打开时恢复最近对话；两份 PDF 不共用上下文。切换标签会停止正在生成的回答。另存为复制当前对话到新路径，原路径记录保留。
 - 右上角 **时钟** 打开历史，按标题搜索；选择“所有本机记录”查看其他 PDF 的聊天。原文件被移动或尚未保存的记录可作为归档查看、导出和删除。
 - **… → 新对话** 保留旧历史。**… → 导出 Markdown** 导出普通、未加密的 `.md` 文件，含正文、所选文字与草稿；截图和全文背景不嵌入导出文件。打开原 PDF 的历史对话后，点消息中的附件标签可预览原截图和选区。
 - **… → 删除当前对话** 需确认。若数据库不可写，侧栏会显示保存失败，退出时提醒；此时可先导出记录。两个应用窗口同时更改同一对话时保留为两条记录，避免静默覆盖。
-- 加密记录绑定当前 Windows 用户环境；跨电脑或更换账户前可导出 Markdown。备份数据库应先退出应用，再复制数据库文件。旧版仅在内存中的会话不会被新版自动找回。
+- 加密记录绑定原系统的用户密钥；跨电脑或更换账户前可导出 Markdown。备份数据库应先退出应用，再复制数据库文件。旧版仅在内存中的会话不会被新版自动找回。
 - 0.6.0 自动迁移 0.5.0 数据库并保留原会话。迁移后请用 0.6.0 或更新版本查看聊天；0.5.0 无法读取新结构。旧会话首次进入新版会采用新的自动附加默认值，之后会记住你在 ＋ 中的选择。
 
-配置与插件存放在 `%LOCALAPPDATA%\PDFReader`。从旧版升级时自动读取原 `SlatePDF` 目录中的设置和插件，原文件保持原样。OCR 与 AI 附件转换的临时快照也在配置目录，正常结束或取消后删除；程序异常退出时可能留下临时文件。加密 PDF 的临时处理快照为解密后的本地数据。
+配置与插件存放在上述系统数据目录。从旧版升级时自动读取原 `SlatePDF` 目录中的设置和插件，原文件保持原样。OCR 与 AI 附件转换的临时快照也在配置目录，正常结束或取消后删除；程序异常退出时可能留下临时文件。加密 PDF 的临时处理快照为解密后的本地数据。
 
 ## 插件
 
@@ -128,7 +172,7 @@ AI 预设在“插件 → AI 服务预设”中选择。清单不会自动连接
 
 自动化测试包含本机 HTTP 服务器、真实 AI 工作线程、长 Markdown 流、截断续写、超时和取消；数学字体的高 DPI 分块渲染与原生光栅图逐像素对照。另覆盖真实鼠标划词和复制、跨页选区、旋转、选择后高亮、实际 PDF 重开、文字移除、批注/签名、页面操作、加密、保存失败回滚、OCR 像素一致性、搜索取消、缩放锚点、配置迁移与 AI 流式响应。独立 smoke 测试包含实际鼠标划词、中英 OCR 后划词、保存重开、截图和 AI / 批注侧栏切换。测试记录见 `VALIDATION.md`。
 
-第三方真实 AI 服务未使用私人账户验证。物理打印机、不同 Windows 版本和所有 PDF 变体尚未逐项验证。
+第三方真实 AI 服务未使用私人账户验证。物理打印机、其他操作系统版本和所有 PDF 变体尚未逐项验证。
 
 ## 许可证
 

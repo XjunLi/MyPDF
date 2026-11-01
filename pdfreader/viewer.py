@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QApplication, QMenu
 from .text_selection import TextPage, distance_to_rect
 from .rendering import PageRenderer
+from .application import shortcut_text
 
 TEXT_TOOLS = {"select"}
 
@@ -426,7 +427,7 @@ class PdfView(QGraphicsView):
         if not self.text_boxes:
             return super().contextMenuEvent(event)
         menu = QMenu(self)
-        copy = menu.addAction("复制  Ctrl+C", self.copy_selection)
+        copy = menu.addAction("复制  " + shortcut_text("Ctrl+C"), self.copy_selection)
         copy.setEnabled(bool(self.selected_text))
         for kind, name in (("highlight", "高亮"), ("underline", "下划线"), ("strike", "删除线")):
             menu.addAction(name, lambda m=kind: self.markupChosen.emit(m, dict(self.text_boxes)))

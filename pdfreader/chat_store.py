@@ -47,7 +47,7 @@ class ChatStore:
     @staticmethod
     def _encode(value):
         # No settings or API credentials are accepted here. There is no
-        # plaintext fallback if Windows encryption is unavailable.
+        # plaintext fallback if system encryption is unavailable.
         return protect(json.dumps(value, ensure_ascii=False)).encode("ascii")
 
     @staticmethod

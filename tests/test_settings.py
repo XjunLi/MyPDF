@@ -6,7 +6,7 @@ from pdfreader.config import Settings, plugins, protect
 def test_upgrade_keeps_settings_key_and_plugins_without_changing_legacy(tmp_path, monkeypatch):
     monkeypatch.delenv("PDFREADER_DATA_DIR", raising=False)
     monkeypatch.delenv("SLATEPDF_DATA_DIR", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr("pdfreader.paths.app_data_parent", lambda: tmp_path)
     old = tmp_path / "SlatePDF"
     (old / "plugins").mkdir(parents=True)
     original = {"auto_ocr": False, "language": "eng", "ai": {"enabled": False, "model": "model-test", "remember_key": True, "protected_key": protect("local-test-key")}}

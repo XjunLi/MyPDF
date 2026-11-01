@@ -13,3 +13,6 @@ pytest==8.4.2
 pywin32-ctypes==0.2.3
 setuptools==84.2.1
 shiboken6==6.8.3
+cffi==2.1.1
+cryptography==50.0.2
+pycparser==3.12

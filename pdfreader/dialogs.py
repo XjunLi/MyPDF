@@ -193,7 +193,7 @@ class AISettingsDialog(QDialog):
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         for field in (self.endpoint, self.model, self.key):
             field.setMinimumHeight(34)
-        self.remember = QCheckBox("记住密钥（Windows 当前用户加密）")
+        self.remember = QCheckBox("记住密钥（系统账户保护的本机加密）")
         self.remember.setChecked(config.get("remember_key", False))
         self.document_mode = QComboBox()
         self.document_mode.addItem("完整文档 · 保留图表，自动适配 DeepSeek", "pdf")

@@ -8,6 +8,7 @@ from .icons import icon, icon_button, split_tool_button
 from .viewer import PdfView
 from .panels import AIPanel
 from .paths import resource_root
+from .application import shortcut_text
 
 
 class ReadingNotice(QLabel):
@@ -82,7 +83,7 @@ class ReaderLayout:
     def toolbar_action(self, bar, name, label, callback, shortcut=None, **kwargs):
         action = self.action(label, callback, shortcut, **kwargs)
         action.setIcon(icon(name))
-        action.setToolTip(label + (f"  {shortcut}" if shortcut else ""))
+        action.setToolTip(label + (f"  {shortcut_text(shortcut)}" if shortcut else ""))
         if bar is not None:
             bar.addAction(action)
         return action
@@ -115,7 +116,7 @@ class ReaderLayout:
         self.tool_group.setExclusive(True)
         self.mode_actions = {}
         modes = [
-            ("select", "选择文字", "拖动划词 · 双击选词 · Ctrl+C 复制"),
+            ("select", "选择文字", "拖动划词 · 双击选词 · " + shortcut_text("Ctrl+C") + " 复制"),
             ("hand", "抓手", "拖动页面"),
             ("highlight", "高亮", "先选择文字，再点击高亮"),
             ("underline", "下划线", "为所选文字添加下划线"),

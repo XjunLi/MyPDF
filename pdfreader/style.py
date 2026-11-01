@@ -1,3 +1,5 @@
+import sys
+
 def prepare_fonts(app):
     from pathlib import Path
     import os
@@ -7,7 +9,7 @@ def prepare_fonts(app):
         path = directory / name
         if path.exists():
             QFontDatabase.addApplicationFont(str(path))
-    app.setFont(QFont("Microsoft YaHei UI", 10))
+    app.setFont(QFont("PingFang SC" if sys.platform == "darwin" else "Microsoft YaHei UI", 10))
 
 
 STYLE = """
@@ -96,3 +98,7 @@ QProgressBar::chunk { background:#ccddf7; border-radius:3px; }
 """
 from .paths import resource_root
 STYLE = STYLE.replace("ASSET_ROOT", (resource_root() / "assets").as_posix())
+
+if sys.platform == "darwin":
+    STYLE = STYLE.replace("'Microsoft YaHei UI','Segoe UI'", "'PingFang SC','Helvetica Neue'")
+    STYLE = STYLE.replace("'Segoe UI'", "'Helvetica Neue'")

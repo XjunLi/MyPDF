@@ -1,47 +1,48 @@
-# 开发与版本管理
+# 开发、构建与发布
 
-主开发目录为 `E:\MyPDF`，远端仓库为 [XjunLi/MyPDF](https://github.com/XjunLi/MyPDF)。源码只有一份，历史由 Git 提交与标签保存，不再复制版本目录。
+主开发目录为 `E:\MyPDF`，远端为 [XjunLi/MyPDF](https://github.com/XjunLi/MyPDF)。使用同一 checkout 和 Git 历史，不创建每版本源码副本。
 
-## 开发环境
-
-当前仅支持 Windows 10/11 x64，建议 Python 3.12。安装依赖需要网络；PDF 阅读、编辑和 OCR 运行时不需要网络。
+## Windows
 
 ```powershell
 Set-Location E:\MyPDF
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r dependency-lock.txt
-.\run.ps1
-```
-
-迁移后的本机已经准备 `.venv`，可直接执行 `run.ps1`。其他电脑从 GitHub 克隆后按上面步骤建立自己的环境。
-
-## 验证与构建
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q --basetemp=work/pytest -o cache_dir=work/pytest-cache
-.\.venv\Scripts\python.exe main.py --smoke-test work/smoke-source
+.\.venv\Scripts\python.exe main.py
 .\build.ps1 -SkipInstall
-& '.\dist\PDF Reader\PDF Reader.exe'
 ```
 
-`build.ps1` 默认安装锁定依赖、运行全部测试，再生成 `dist/PDF Reader/PDF Reader.exe`。已有依赖时可用 `-SkipInstall`。所有构建、缓存及测试结果均位于忽略目录中；不会新增 `0.x.y` 源码副本。
+固定输出：`dist/PDF Reader/PDF Reader.exe`。
 
-原始文档的本地只读回归（也支持打包后的 EXE）：
+## macOS
 
-```powershell
-.\.venv\Scripts\python.exe main.py --inspect-pdf 'D:\Documents\sample.pdf' work/inspect-source
+需要 macOS 15+、Python 3.12，在目标架构的 Mac 上原生构建：
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r dependency-lock-macos.txt
+.venv/bin/python main.py
+bash build-macos.sh
 ```
 
-此命令使用独立设置、模拟 HTTP 响应，记录缩放截图、完整页面转换、GUI 计时和原文件未变更检查；不使用用户配置、密钥或外部 AI。结果保持在 `work/`，不要提交用户文档或这些截图。
+固定输出：`dist/PDF Reader.app`。本次仅发布 Apple Silicon（arm64）Mac 包。应用包含文档关联、Retina 图标和 Qt 的 Finder 文件打开事件处理。原生加密使用 Keychain 保存随机 256-bit 密钥，数据库记录由 AES-GCM 认证加密；本地 keychain-id 只含非秘密标识。钥匙串失败不得回退到明文。
 
-## Git 工作流程
+## 验证
 
-- `main` 保留可运行版本；每个独立改动做一次清晰的提交。
-- 发布前同步代码版本、Windows 文件版本、变更记录及验证记录。
-- 使用注释标签（例如 `v0.6.0`、`v0.6.1`）定位版本。提交和标签推送至同一远端，禁止强制覆盖历史。
-- `v0.6.0` 是迁移前完整功能基线；`v0.6.1` 暂时移除终端。旧实现可以从 Git 中恢复。
-- 安装包不进入 Git 源码历史；需要分享时使用构建产物或 GitHub Release。聊天记录、API Key、用户设置和私有文档均不提交。
+`python scripts/build.py` 在当前环境执行全部 pytest、源码集成检查、PyInstaller 原生打包和打包应用集成检查。测试均用隔离目录和模拟服务，禁止真实用户密钥与外部 AI 调用。Windows 可以通过 `build.ps1` 安装锁定依赖，Mac 通过 `build-macos.sh`。
 
-## 平台范围
+```bash
+python -m pytest tests -q --basetemp=work/pytest -o cache_dir=work/pytest-cache
+python main.py --smoke-test work/smoke-source
+python main.py --inspect-pdf /path/to/sample.pdf work/inspect-source
+```
 
-macOS 尚未适配。Qt 和 PDF 引擎具备跨平台基础，但当前本机加密依赖 Windows DPAPI，还需要替换平台相关路径、字体与构建流程，并在真实 macOS 环境中验证。移除终端不会自动使应用获得 Mac 支持。
+`--inspect-pdf` 只读源文件，生成本地截图和处理结果，不使用用户配置或网络。私人 PDF、截图、数据库、密钥和设置不能进入 Git。临时内容在 `work/`，打包产物在 `dist/`，本地环境在 `.venv/`。
+
+## 发布
+
+`.github/workflows/build.yml` 在 Windows x64、macOS arm64 分别测试与打包。main 的每次提交保存 Actions 构建产物；注释版本标签 `v*` 在全部检查通过后自动发布 GitHub Release，附上两个平台 ZIP、精确提交源码、SHA256 和每平台验证记录。正式包不写入 Git 源码历史。
+
+发布前同步 Python 版本号、Windows version_info、macOS spec、CHANGELOG 和验证说明。先推送 main 并检查 Actions，再创建注释标签。不要重写已发布的标签或 force-push。
+
+Mac 包目前只有 ad-hoc 签名，没有 Developer ID 和 Apple 公证，README 必须说明首次启动流程；不得声称已公证。物理打印机、所有 PDF 变体与所有系统版本仍需要实际环境验证。

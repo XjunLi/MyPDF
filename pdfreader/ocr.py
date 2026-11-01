@@ -31,7 +31,8 @@ def recognize(input_path, output_dir, pages, language="eng+chi_sim"):
                     result.append([number, str(filename)])
             progress = json.dumps({"done": index + 1, "total": len(pages), "page": number + 1})
             (output / "progress.json").write_text(progress, encoding="utf-8")
-            print(progress, flush=True)
+            if sys.stdout is not None:
+                print(progress, flush=True)
     (output / "result.json").write_text(json.dumps(result), encoding="utf-8")
     return result
 
@@ -44,5 +45,6 @@ def main(args):
         output = Path(args[1])
         output.mkdir(parents=True, exist_ok=True)
         (output / "error.txt").write_text(str(exc), encoding="utf-8")
-        print(str(exc), file=sys.stderr, flush=True)
+        if sys.stderr is not None:
+            print(str(exc), file=sys.stderr, flush=True)
         return 1

@@ -24,6 +24,7 @@ from .paths import data_root, resource_root, tessdata_path
 from .style import STYLE, prepare_fonts
 from .layout import ReaderLayout
 from .documents import DocumentTabs
+from .application import FileOpenRouter
 
 
 class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
@@ -99,7 +100,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         file.addAction(self.action("打印…", self.print_document, "Ctrl+P", document=True))
         file.addAction(self.action("关闭当前文档", lambda: self.close_document(), "Ctrl+W", document=True))
         file.addSeparator()
-        file.addAction(self.action("退出", self.close, "Alt+F4"))
+        file.addAction(self.action("退出", self.close, "Ctrl+Q" if sys.platform == "darwin" else "Alt+F4"))
         edit = self.root_menu.addMenu("编辑")
         edit.addAction(self.undo_action)
         edit.addAction(self.redo_action)
@@ -869,8 +870,10 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 "签名：拖出放置框后手写。保存的是可见笔迹，不是证书数字签名。\n\n"
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
                 "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；DeepSeek 自动将 PDF 转为逐页文字与图片；其他服务不支持 PDF 时可改用全文文字。被截断的回答可点击继续。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
-                "聊天记录：SQLite 自动保存到本机，Windows 当前用户加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"
+                "聊天记录：SQLite 自动保存到本机，系统账户保护的本机加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"
                 "范围：本版本提供主要阅读与编辑流程。暂不包含证书签章、PDF/A 校验、XFA、专业印前处理及 Word 排版转换。")
+        if sys.platform == "darwin":
+            text = text.replace("Ctrl+", "⌘+")
         QMessageBox.information(self, "使用说明", text)
 
     def closeEvent(self, event):
@@ -907,6 +910,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
 
 def run(filenames=None):
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    file_router = FileOpenRouter(app)
     app.setApplicationName("PDF Reader")
     app.setOrganizationName("PDF Reader")
     prepare_fonts(app)
@@ -914,6 +918,7 @@ def run(filenames=None):
     app.setStyleSheet(STYLE)
     window = MainWindow()
     window.show()
+    file_router.set_window(window)
     if filenames:
         paths = [filenames] if isinstance(filenames, (str, Path)) else filenames
         QTimer.singleShot(0, lambda: window.open_files(paths))
