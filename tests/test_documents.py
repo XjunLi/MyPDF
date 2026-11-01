@@ -341,8 +341,11 @@ def test_toolbar_is_centered_without_brand_and_tabs_stay_usable_when_full(reader
     reader.modified_label.setText("未保存")
     reader.ocr_progress_action.setVisible(True)
     reader.ocr_stop_action.setVisible(True)
-    reader.status_label.timer.setInterval(20)
     reader.status_label.setText("已保存并验证：" + str(pdf_path) * 8)
+    assert reader.status_label.timer.isActive()
+    # Native painting can take longer than 20 ms. Check layout before timing
+    # its expiry, so a correctly expired notice is not mistaken for a failure.
+    reader.status_label.timer.stop()
     qapp.processEvents()
     assert reader.status_label.isVisible()
     assert reader.document_tabs.isVisible()
@@ -354,8 +357,8 @@ def test_toolbar_is_centered_without_brand_and_tabs_stay_usable_when_full(reader
     for button in reader.footer.findChildren(QToolButton):
         if button.objectName() == "qt_toolbar_ext_button":
             assert not button.isVisible()
-    # Windows coarse timers may be delivered after 30 ms while the full suite
-    # is rendering multiple windows. Wait for the observable hide event.
+    reader.status_label.timer.start(20)
+    # Wait for the observable hide event rather than one exact timer deadline.
     for _ in range(50):
         if reader.status_label.isHidden():
             break
