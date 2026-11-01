@@ -376,7 +376,7 @@ class PdfView(QGraphicsView):
             self.clear_selection()
             self.drag_page, self.drag_start = number, point
             self.ink = [tuple(point)] if self.mode == "ink" else []
-            self.selection = None if self.mode == "comment" else (number, tuple(fitz.Rect(point, point)))
+            self.selection = None if self.mode in ("comment", "ink") else (number, tuple(fitz.Rect(point, point)))
         self.viewport().update()
         event.accept()
 
@@ -394,9 +394,10 @@ class PdfView(QGraphicsView):
                 event.accept()
                 return
             _, point = self.locate(event.position().toPoint(), self.drag_page)
-            self.selection = (self.drag_page, tuple(fitz.Rect(self.drag_start, point).normalize()))
             if self.mode == "ink":
                 self.ink.append(tuple(point))
+            else:
+                self.selection = (self.drag_page, tuple(fitz.Rect(self.drag_start, point).normalize()))
             self.viewport().update()
             event.accept()
         else:

@@ -3,7 +3,7 @@ from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog, QToolButton
 from pdfreader.app import MainWindow
-from pdfreader.dialogs import CommentDialog, TextDialog
+from pdfreader.dialogs import CommentDialog, SignatureDialog, TextDialog
 from test_selection import drag, endpoints, visible_point
 
 
@@ -155,4 +155,34 @@ def test_edits_resume_interrupted_ocr_but_respect_explicit_cancel(qapp, pdf_path
     assert window.ocr_pending_open is None
     window.ocr_process = None
     window.document.saved_state = window.document.state
+    window.close()
+
+
+def test_signature_hides_placement_box_while_signing_and_after_cancel(qapp, pdf_path, tmp_path, monkeypatch):
+    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
+    seen = []
+    def cancel(dialog):
+        seen.append(window.view.selection)
+        dialog.reject()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(SignatureDialog, "exec", cancel)
+    window.mode_actions["signature"].trigger()
+    drag(window.view, visible_point(window.view, 0, (100, 350)), visible_point(window.view, 0, (300, 420)))
+    assert seen == [None] and window.view.selection is None
+    assert not window.document.annotations()
+    window.close()
+
+
+def test_pen_stroke_draws_without_placement_box(qapp, pdf_path, tmp_path, monkeypatch):
+    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
+    window.mode_actions["ink"].trigger()
+    viewport = window.view.viewport()
+    start, end = visible_point(window.view, 0, (100, 350)), visible_point(window.view, 0, (300, 420))
+    QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(viewport, end)
+    assert window.view.selection is None and len(window.view.ink) > 1
+    QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
+    assert window.view.selection is None
+    assert window.document.annotations()[0]["type"] == "Ink"
+    window.undo()
     window.close()

@@ -494,6 +494,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         elif mode=="text":
             self.view.begin_inline_text(page,fitz.Rect(rect).tl)
         elif mode == "signature":
+            self.view.clear_selection()
             dialog = SignatureDialog(self)
             if dialog.exec():
                 p = self.document.doc[page]
@@ -507,6 +508,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                     self.mutate(lambda:self.document.add_image(page,rect,dialog.image_path))
                 self.set_mode("select","拖动选择文字")
         elif mode == "image":
+            self.view.clear_selection()
             filename, _ = QFileDialog.getOpenFileName(self, "插入图片", "", "图片 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
             if filename:
                 self.mutate(lambda: self.document.add_image(page, rect, filename))
