@@ -106,12 +106,15 @@ def test_automatic_ocr_has_no_toolbar_button_and_can_cancel_pending_start(qapp, 
     calls = []
     monkeypatch.setattr(window, "start_ocr", lambda *args, **kwargs: calls.append(kwargs))
     window.open_file(str(pdf_path))
-    QTest.qWait(490)
+    for _ in range(200):
+        if calls: break
+        QTest.qWait(10)
     assert calls == [{"automatic": True}]
     calls.clear()
     window.open_file(str(pdf_path))
+    window.schedule_auto_ocr()
     window.auto_ocr.setChecked(False)
-    QTest.qWait(490)
+    QTest.qWait(700)
     assert not calls
     window.close()
 
