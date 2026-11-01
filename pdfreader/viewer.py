@@ -198,6 +198,7 @@ class PdfView(QGraphicsView):
         if not cancel: QApplication.inputMethod().commit()
         if cancel or (not editor.region and not editor.input.toPlainText().strip()) or (editor.region and editor.input.toPlainText()==editor.original_text and not editor.size_modified and not editor.color_modified and editor.fontname=="native" and editor.point==editor.original_point):
             self.dismiss_inline_text(); return True
+        editor.reflow()  # Revalidate after IME commits or font acquisition.
         try: payload=editor.payload()
         except ValueError as exc: editor.show_error(str(exc)); return False
         self.textInsertRequested.emit(editor.number,payload)

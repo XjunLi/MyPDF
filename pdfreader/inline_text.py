@@ -5,7 +5,7 @@ import pymupdf as fitz
 from PySide6.QtCore import QObject,QEvent,QPointF,QRectF,QTimer,Qt,Slot
 from PySide6.QtGui import QColor,QFont,QPen,QTextCursor,QTextCharFormat,QTextBlockFormat,QFontMetricsF
 from PySide6.QtWidgets import (QApplication,QPlainTextEdit,QFrame,QHBoxLayout,QComboBox,
-    QDoubleSpinBox,QColorDialog,QDialog,QGraphicsProxyWidget)
+    QDoubleSpinBox,QColorDialog,QDialog,QGraphicsProxyWidget,QVBoxLayout,QLabel,QPushButton,QWidget)
 from .application import shortcut_text
 from .fonts import font_choices,qt_family,library_face,qt_original_family,catalog_match
 from .icons import icon_button
@@ -48,7 +48,7 @@ class InlineTextEditor(QObject):
         self.angle=0; self.background_document=None; self.background_renderer=None
         self.font_job=None; self.font_attempts=set(); self.native_families={}; self.preview_fonts=OrderedDict()
         self.settings=getattr(view.window(),"settings",None)
-        self.updating=False; self.modal=False; self.disposed=False; self.error=""; self.preview_style=None
+        self.updating=False; self.modal=False; self.disposed=False; self.error=""; self.font_warning=""; self.font_substitutions={}; self.preview_style=None
         self.fontname="native" if region else "library:sans-sc"
         self.color=QColor(region.primary_style.color) if region else QColor("#141f2e"); self.drag=None
         self.input=TextInput(); self.input.owner=self
@@ -67,7 +67,8 @@ class InlineTextEditor(QObject):
         self.input.installEventFilter(self)
         self.toolbar=QFrame(view.viewport()); self.toolbar.setObjectName("inlineTextTools")
         self.toolbar.setStyleSheet("QFrame#inlineTextTools {background:#fff;border:1px solid #dce3ee;border-radius:6px;}")
-        row=QHBoxLayout(self.toolbar); row.setContentsMargins(5,3,5,3); row.setSpacing(3)
+        outer=QVBoxLayout(self.toolbar); outer.setContentsMargins(5,3,5,3); outer.setSpacing(4)
+        row=QHBoxLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(3); outer.addLayout(row)
         self.move=icon_button("move","拖动移动文字框")
         self.move.setCursor(Qt.CursorShape.SizeAllCursor); self.move.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.move.installEventFilter(self); row.addWidget(self.move)
@@ -79,7 +80,26 @@ class InlineTextEditor(QObject):
         self.library_button=icon_button("gear","字体库",self.open_library); row.addWidget(self.library_button)
         self.apply=icon_button("check","完成 · "+shortcut_text("Ctrl+Return"),lambda:view.finish_inline_text())
         self.cancel=icon_button("close","取消 · Esc",lambda:view.finish_inline_text(cancel=True))
+        self.apply.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.cancel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         row.addWidget(self.apply); row.addWidget(self.cancel)
+        self.error_area=QWidget(self.toolbar)
+        error_layout=QVBoxLayout(self.error_area); error_layout.setContentsMargins(4,4,4,3); error_layout.setSpacing(5)
+        self.error_label=QLabel(); self.error_label.setWordWrap(True)
+        self.error_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.error_label.setMaximumWidth(410)
+        self.error_label.setStyleSheet("color:#9c3d30;padding:0;")
+        error_layout.addWidget(self.error_label)
+        actions=QHBoxLayout(); actions.setSpacing(5)
+        self.choose_font_button=QPushButton("更改字体")
+        self.copy_draft_button=QPushButton("复制草稿")
+        self.discard_button=QPushButton("取消编辑")
+        for button in (self.choose_font_button,self.copy_draft_button,self.discard_button):
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus); button.setStyleSheet("padding:4px 8px;"); actions.addWidget(button)
+        actions.addStretch(); error_layout.addLayout(actions)
+        self.choose_font_button.clicked.connect(self.font.showPopup)
+        self.copy_draft_button.clicked.connect(self.copy_draft)
+        self.discard_button.clicked.connect(lambda:view.finish_inline_text(cancel=True))
+        outer.addWidget(self.error_area); self.error_area.hide()
         self.font.currentIndexChanged.connect(self.font_changed)
         self.size.valueChanged.connect(self.size_changed)
         self.input.textChanged.connect(self.reflow)
@@ -98,7 +118,7 @@ class InlineTextEditor(QObject):
 
     def populate_fonts(self,selected):
         self.font.blockSignals(True); self.font.clear()
-        if self.region: self.font.addItem("原字体 · "+self.region.primary_style.font,"native")
+        if self.region: self.font.addItem("自动 · 优先原字体","native")
         for label,identity in font_choices(): self.font.addItem(label,identity)
         self.font.setCurrentIndex(max(0,self.font.findData(selected))); self.font.blockSignals(False)
 
@@ -127,6 +147,7 @@ class InlineTextEditor(QObject):
 
     def font_changed(self):
         selected=self.font.currentData()
+        self.font_substitutions.clear()
         if selected=="native": self.fontname=selected; self.apply_format(font=True); self.reflow(); return
         try: library_face(selected[8:])
         except ValueError:
@@ -218,6 +239,54 @@ class InlineTextEditor(QObject):
                 self.preview_fonts.popitem(last=False)
         return font
 
+    def fallback_styles(self,text,styles):
+        """Substitute only unavailable font groups, keeping size/color per glyph."""
+        from .fonts import character_font
+        groups={}
+        for char,style in zip(text,styles):
+            if char!="\n": groups.setdefault(style["font"],[]).append(char)
+        replacements={}
+        for name,chars in groups.items():
+            try: self.preview_font(name,"".join(chars))
+            except (ValueError,RuntimeError,OSError):
+                default="library:sans-sc-bold" if any(word in name.lower() for word in ("bold","black","heavy","demi")) else "library:sans-sc"
+                replacements[name]={char:character_font(default,char) for char in set(chars)}
+        if replacements:
+            changed=[]; position=0
+            for index,(char,style) in enumerate(zip(text,styles)):
+                length=len(char.encode("utf-16-le"))//2
+                if char!="\n" and style["font"] in replacements:
+                    identity=replacements[style["font"]][char]
+                    styles[index]={**style,"font":identity}
+                    self.font_substitutions.setdefault(style["font"],set()).add(identity)
+                    if changed and changed[-1][1]==position and changed[-1][2]==identity:
+                        changed[-1]=(changed[-1][0],position+length,identity)
+                    else: changed.append((position,position+length,identity))
+                position+=length
+            cursor=self.input.textCursor(); previous=self.input.textCursor()
+            formats=[]
+            for start,end,identity in changed:
+                face=library_face(identity[8:])
+                fmt=QTextCharFormat(); fmt.setFontFamilies([qt_family(identity,self)])
+                fmt.setFontWeight(QFont.Weight.Bold if face.flags.get("bold") else QFont.Weight.Normal)
+                fmt.setFontItalic(bool(face.flags.get("italic"))); fmt.setProperty(FONT_PROPERTY,identity)
+                formats.append((start,end,fmt))
+            self.input.blockSignals(True)
+            # Keep automatic formatting in the same undo step as the input.
+            cursor.joinPreviousEditBlock()
+            try:
+                for start,end,fmt in formats:
+                    cursor.setPosition(start); cursor.setPosition(end,QTextCursor.MoveMode.KeepAnchor); cursor.mergeCharFormat(fmt)
+            finally:
+                cursor.endEditBlock(); self.input.setTextCursor(previous); self.input.blockSignals(False)
+            self.auto_acquire()
+        active={style["font"] for style in styles}
+        originals=[name for name,fonts in self.font_substitutions.items() if active.intersection(fonts)]
+        self.font_warning=("原字体「"+"、".join(originals)+"」不可用于当前文字，已自动使用默认字体；字号、颜色已保留。") if originals else ""
+        index=self.font.findData("native")
+        if index>=0: self.font.setItemText(index,"自动 · 已用默认字体" if originals else "自动 · 优先原字体")
+        return styles
+
     def reflow(self,*_):
         if self.updating or self.disposed: return
         self.updating=True
@@ -230,7 +299,9 @@ class InlineTextEditor(QObject):
                 bounds=self.allowed_bounds
                 width=bounds.width; self.margin=0.
                 family=self.native_family(self.region.primary_style.font,self.input.toPlainText()) if self.fontname=="native" else qt_family(self.fontname,self)
-                try: reflow_replacement(page,self.region,self.input.toPlainText(),styles=self.text_styles(),bounds_override=bounds,resolver=self.preview_font)
+                try:
+                    styles=self.fallback_styles(self.input.toPlainText(),self.text_styles())
+                    reflow_replacement(page,self.region,self.input.toPlainText(),styles=styles,bounds_override=bounds,resolver=self.preview_font)
                 except (ValueError,RuntimeError) as exc:
                     self.error=str(exc); self.auto_acquire()
                 self.available_height=bounds.height
@@ -278,7 +349,9 @@ class InlineTextEditor(QObject):
             self.position()
         except (ValueError,RuntimeError) as exc:
             self.error=str(exc)
-        finally: self.updating=False
+        finally:
+            self.updating=False
+            self.update_error()
 
     def text_styles(self):
         result=[]; block=self.input.document().begin()
@@ -379,8 +452,7 @@ class InlineTextEditor(QObject):
         if self.error: raise ValueError(self.error)
         if self.region:
             return {"region":self.region,"text":self.input.toPlainText(),"fontname":None if self.fontname=="native" else self.fontname,
-                    "size":self.size.value() if self.size_modified or self.fontname!="native" else None,
-                    "color":self.color.rgb()&0xffffff if self.color_modified or self.fontname!="native" else None,"styles":self.text_styles(),
+                    "size":None,"color":None,"styles":self.text_styles(),
                     "offset":self.unrotated_offset()}
         return {"point":(self.point.x(),self.point.y()),"text":self.input.toPlainText(),"size":self.size.value(),
                 "fontname":self.fontname,"color":(self.color.redF(),self.color.greenF(),self.color.blueF())}
@@ -391,9 +463,22 @@ class InlineTextEditor(QObject):
         point=fitz.Point(delta.x(),delta.y())*page.derotation_matrix-fitz.Point(0,0)*page.derotation_matrix
         return tuple(point)
 
+    def update_error(self):
+        if self.disposed: return
+        self.error_label.setText(self.error or self.font_warning)
+        self.error_label.setStyleSheet("color:"+("#9c3d30" if self.error else "#876019")+";padding:0;")
+        self.error_area.setVisible(bool(self.error or self.font_warning))
+        self.position()
+        self.view.viewport().update()
+
+    def copy_draft(self):
+        QApplication.clipboard().setText(self.input.toPlainText())
+        self.view.message.emit("编辑草稿已复制；可选择字体后继续，或取消本次编辑。")
+
     def show_error(self,message):
         self.error=message
         self.input.setToolTip(message)
+        self.update_error()
         self.view.message.emit(message)
 
     def dispose(self):

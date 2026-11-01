@@ -469,8 +469,9 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
     def insert_inline_text(self,page,payload):
         function=self.document.edit_text_box if "region" in payload else self.document.insert_text_box
         if self.mutate(lambda:function(page,**payload),preserve_draft=True):
-            self.view.set_mode("select")
-            self.mode_actions["select"].setChecked(True)
+            mode="edit" if "region" in payload else "select"
+            self.view.set_mode(mode)
+            self.mode_actions[mode].setChecked(True)
             self.schedule_auto_ocr()
 
     def open_font_library(self):
@@ -917,7 +918,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 "多文档：可一次打开或拖入多份 PDF；两份起在底部左侧显示标签，支持拖动排序。Ctrl+Tab 切换，Ctrl+W 关闭当前文档。各自保留位置、缩放、撤销和 AI 会话。\n\n"
                 "阅读：默认选择文字，滚轮连续滚动，Ctrl+滚轮缩放；抓手在菜单“视图 → 阅读工具”中。左侧缩略图与目录跳页；Ctrl+F 搜索。\n\n"
                 "批注：高亮和画笔旁的箭头可选颜色、画笔粗细。先划词，再点高亮或注释。没有选区时，注释工具单击页面放置便笺；右侧双击可修改备注。\n\n"
-                "编辑：加文字单击放置，直接输入并随内容扩展；插图先拖框。改文字点击文字行或拖框。默认保留原字体、字号和颜色；无法匹配原字体时会提示。复杂排版不会自动重排。\n\n"
+                "编辑：加文字单击放置，直接输入并随内容扩展；插图先拖框。改文字点击文字行或拖框。优先保留原字体、字号和颜色；原字体不可用时自动用默认字体并保留字号和颜色。复杂排版不会自动重排。\n\n"
                 "签名：单击放置或拖框选择区域，可手写、键入姓名或导入 PNG / JPEG。保存的是可见内容，不是证书数字签名。\n\n"
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
                 "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；DeepSeek 自动将 PDF 转为逐页文字与图片；其他服务不支持 PDF 时可改用全文文字。被截断的回答可点击继续。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"

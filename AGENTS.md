@@ -14,3 +14,5 @@
 - Update `pdfreader/__init__.py`, `assets/version_info.txt`, and `CHANGELOG.md` for a release. Push only within the user's authorized scope; never force-push published history.
 
 - Git identity confirmed by the user on 2026-11-01: LI JUNZHE <125676363+XjunLi@users.noreply.github.com>, for both author and committer. Do not replace it or add Codex co-authorship.
+
+- User preference confirmed on 2026-11-01: inline editing automatically falls back to bundled default fonts when the original face cannot supply the edited text. Preserve size/color and supported bold style, show the substitution, and allow completion. Keep low-level exact-font validation separate. Show local builds directly to this user.

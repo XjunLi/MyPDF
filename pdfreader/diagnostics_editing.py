@@ -48,6 +48,22 @@ def exercise_editing(window,root,output):
     span=next(s for b in window.document.doc[0].get_text("dict")["blocks"] for line in b.get("lines",[]) for s in line["spans"] if "Edited heading" in s["text"])
     assert abs(span["size"]-18.5)<.01 and span["color"]==0x264da6
     output["checks"].append("on_page_original_edit_preserves_style_without_dialog")
+    assert window.view.mode=="edit"
+    click((150,147))
+    editor=window.view.inline_editor
+    assert editor is not None and editor.region
+    from PySide6.QtGui import QTextCursor
+    editor.input.moveCursor(QTextCursor.MoveOperation.End)
+    event=QInputMethodEvent(); event.setCommitString(" 中文")
+    QApplication.sendEvent(editor.input,event); app.processEvents()
+    assert not editor.error and editor.font_warning and editor.error_area.isVisible()
+    window.grab().save(str(root/"font-fallback.png"))
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); app.processEvents()
+    assert window.view.inline_editor is None and window.view.mode=="edit"
+    assert window.document.doc[0].search_for("中文")
+    window.undo()
+    assert not window.document.doc[0].search_for("中文")
+    output["checks"].append("automatic_default_font_fallback_real_check_button_and_continue_editing")
     window.mode_actions["text"].trigger(); click((65,230))
     editor=window.view.inline_editor
     assert editor is not None

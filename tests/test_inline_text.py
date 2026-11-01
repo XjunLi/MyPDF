@@ -212,3 +212,78 @@ def test_fragmented_paragraph_stays_in_column_and_font_preview_is_reused(reader,
     assert next(iter(editor.preview_fonts.values()))[0] is face
     reader.view.finish_inline_text(cancel=True)
     assert not editor.preview_fonts
+
+
+
+def missing_font_draft(reader,qapp):
+    reader.mode_actions["edit"].trigger()
+    box=reader.document.doc[0].search_for("Replace this original sentence.")[0]
+    reader.edit_at(0,tuple((box.tl+box.br)/2))
+    editor=reader.view.inline_editor
+    editor.input.moveCursor(QTextCursor.MoveOperation.End)
+    event=QInputMethodEvent(); event.setCommitString(" 中文")
+    QApplication.sendEvent(editor.input,event); qapp.processEvents()
+    assert not editor.error and "默认字体" in editor.font_warning
+    return editor
+
+
+def test_missing_font_automatically_falls_back_and_check_button_commits(reader,qapp,tmp_path):
+    editor=missing_font_draft(reader,qapp)
+    size,color=editor.region.primary_style.size,editor.region.primary_style.color
+    draft=editor.input.toPlainText()
+    assert editor.error_area.isVisible() and editor.error_label.text()==editor.font_warning
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is None and reader.view.mode=="edit"
+    assert draft in reader.document.page_text(0)
+    span=next(s for b in reader.document.doc[0].get_text("dict")["blocks"] for line in b.get("lines",[]) for s in line["spans"] if "Replace this" in s["text"])
+    assert span["size"]==pytest.approx(size,abs=.01) and span["color"]==color
+    assert "NotoSansCJKsc" in span["font"]
+    path=tmp_path/"font-replaced.pdf"; reader.document.save(path)
+    with fitz.open(path) as saved: assert "中文" in saved[0].get_text()
+    box=reader.document.doc[0].search_for("Searchable words and comments.")[0]
+    QTest.mouseClick(reader.view.viewport(),Qt.MouseButton.LeftButton,pos=visible_point(reader.view,0,(box.tl+box.br)/2))
+    assert reader.view.inline_editor and "Searchable words" in reader.view.inline_editor.original_text
+
+
+def test_invalid_layout_is_visible_copyable_and_cancel_does_not_trap_editor(reader,qapp):
+    editor=place(reader,(90,550)); editor.input.setPlainText("too many lines "*100)
+    before=reader.document.doc.tobytes(no_new_id=True)
+    assert editor.error and editor.error_area.isVisible()
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is editor and not reader.document.dirty
+    assert reader.document.doc.tobytes(no_new_id=True)==before
+    QTest.mouseClick(editor.copy_draft_button,Qt.MouseButton.LeftButton)
+    assert qapp.clipboard().text()==editor.input.toPlainText()
+    QTest.mouseClick(editor.discard_button,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is None and not reader.document.dirty
+
+
+def test_rejected_paste_does_not_leave_valid_draft_permanently_blocked(reader,qapp):
+    from PySide6.QtCore import QMimeData
+    editor=place(reader); QTest.keyClicks(editor.input,"a valid draft")
+    source=QMimeData(); source.setText("x"*25001); editor.input.insertFromMimeData(source)
+    assert editor.error
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is None and "a valid draft" in reader.document.page_text(0)
+
+
+def test_automatic_font_fallback_undo_restores_text_in_one_step(reader,qapp):
+    editor=missing_font_draft(reader,qapp)
+    QTest.keyClick(editor.input,Qt.Key.Key_Z,Qt.KeyboardModifier.ControlModifier); qapp.processEvents()
+    assert editor.input.toPlainText()==editor.original_text
+    assert not editor.error and not editor.font_warning
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is None and not reader.document.dirty
+
+
+def test_unavailable_bold_font_keeps_bold_size_and_color_with_default(reader,qapp):
+    reader.document.doc[0].insert_text((40,210),"Colored title",fontname="hebo",fontsize=18.5,color=(.8,.1,.2))
+    reader.after_change(); reader.mode_actions["edit"].trigger()
+    box=reader.document.doc[0].search_for("Colored title")[0]; reader.edit_at(0,tuple((box.tl+box.br)/2))
+    editor=reader.view.inline_editor; editor.input.moveCursor(QTextCursor.MoveOperation.End)
+    event=QInputMethodEvent(); event.setCommitString(" 中文"); QApplication.sendEvent(editor.input,event)
+    assert not editor.error and editor.font_warning
+    QTest.mouseClick(editor.apply,Qt.MouseButton.LeftButton); qapp.processEvents()
+    assert reader.view.inline_editor is None
+    spans=[s for b in reader.document.doc[0].get_text("dict")["blocks"] for line in b.get("lines",[]) for s in line["spans"] if "Colored" in s["text"] or "中文" in s["text"]]
+    assert spans and all(abs(s["size"]-18.5)<.01 and s["color"]==0xcc1a33 and "Bold" in s["font"] for s in spans)
