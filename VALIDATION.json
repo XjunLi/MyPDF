@@ -2,7 +2,7 @@
   "version": "0.8.0",
   "date": "2026-11-01",
   "local_windows_tests": {
-    "passed": 195,
+    "passed": 196,
     "skipped": 1
   },
   "smoke_check_count": 28,

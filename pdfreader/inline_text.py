@@ -1,5 +1,6 @@
 """A native, IME-capable text editor anchored in displayed PDF coordinates."""
 import math
+from collections import OrderedDict
 import pymupdf as fitz
 from PySide6.QtCore import QObject,QEvent,QPointF,QRectF,QTimer,Qt,Slot
 from PySide6.QtGui import QColor,QFont,QPen,QTextCursor,QTextCharFormat,QTextBlockFormat,QFontMetricsF
@@ -45,12 +46,14 @@ class InlineTextEditor(QObject):
         self.region=region; self.original_text=" ".join(region.text.splitlines()) if region else ""
         self.size_modified=self.color_modified=False
         self.angle=0; self.background_document=None; self.background_renderer=None
-        self.font_job=None; self.font_attempts=set(); self.native_families={}
+        self.font_job=None; self.font_attempts=set(); self.native_families={}; self.preview_fonts=OrderedDict()
         self.settings=getattr(view.window(),"settings",None)
         self.updating=False; self.modal=False; self.disposed=False; self.error=""
         self.fontname="native" if region else "library:sans-sc"
         self.color=QColor(region.primary_style.color) if region else QColor("#141f2e"); self.drag=None
         self.input=TextInput(); self.input.owner=self
+        # The document and widget must use one DPI, including Cocoa/offscreen.
+        self.input.document().documentLayout().setPaintDevice(self.input)
         self.proxy=InlineProxy(); self.proxy.owner=self
         self.proxy.setWidget(self.input); self.proxy.setParentItem(view.items_by_page[number]); self.proxy.setZValue(20)
         if region: self.prepare_original()
@@ -200,6 +203,21 @@ class InlineTextEditor(QObject):
             cursor.setPosition(start); cursor.setPosition(end,QTextCursor.MoveMode.KeepAnchor); cursor.setCharFormat(fmt)
         cursor.clearSelection(); cursor.setPosition(0); self.input.setTextCursor(cursor)
 
+    def preview_font(self,name,text):
+        from .text_edit import resolve_font
+        from .fonts import supports,FONT_CACHE_BYTES
+        cached=self.preview_fonts.get(name)
+        if cached and supports(cached[0].font,text):
+            self.preview_fonts.move_to_end(name)
+            return cached[0]
+        font=resolve_font(self.view.document.doc[self.number],name,text)
+        cost=len(font.buffer)
+        if cost<=FONT_CACHE_BYTES:
+            self.preview_fonts[name]=(font,cost)
+            while len(self.preview_fonts)>12 or sum(x[1] for x in self.preview_fonts.values())>FONT_CACHE_BYTES:
+                self.preview_fonts.popitem(last=False)
+        return font
+
     def reflow(self,*_):
         if self.updating or self.disposed: return
         self.updating=True
@@ -212,7 +230,7 @@ class InlineTextEditor(QObject):
                 bounds=self.allowed_bounds
                 width=bounds.width; self.margin=0.
                 family=self.native_family(self.region.primary_style.font,self.input.toPlainText()) if self.fontname=="native" else qt_family(self.fontname,self)
-                try: reflow_replacement(page,self.region,self.input.toPlainText(),styles=self.text_styles(),bounds_override=bounds)
+                try: reflow_replacement(page,self.region,self.input.toPlainText(),styles=self.text_styles(),bounds_override=bounds,resolver=self.preview_font)
                 except (ValueError,RuntimeError) as exc:
                     self.error=str(exc); self.auto_acquire()
                 self.available_height=bounds.height
@@ -233,9 +251,9 @@ class InlineTextEditor(QObject):
             self.input.document().setDocumentMargin(self.margin)
             self.input.setFixedWidth(math.ceil(width))
             if self.region:
-                height=max(self.region.rect[3]-self.region.rect[1],self.input.document().size().height()*QFontMetricsF(self.input.document().defaultFont()).lineSpacing()+2)
+                height=max(self.region.rect[3]-self.region.rect[1],self.input.document().size().height()*QFontMetricsF(self.input.document().defaultFont(),self.input).lineSpacing()+2)
             else: height=self.layout.height
-            self.body_width=width; self.body_height=max(16,min(height,self.available_height))
+            self.body_width=width; self.body_height=max(16,min(math.ceil(height)+2,self.available_height))
             self.position()
         except (ValueError,RuntimeError) as exc:
             self.error=str(exc)
@@ -368,4 +386,5 @@ class InlineTextEditor(QObject):
         if self.background_renderer: self.background_renderer.clear()
         if self.background_document: self.background_document.close()
         self.background_renderer=self.background_document=self.region=None
+        self.preview_fonts.clear(); self.native_families.clear()
         self.deleteLater()

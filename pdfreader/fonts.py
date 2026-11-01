@@ -222,6 +222,16 @@ def qt_family(identity,owner=None):
 
 
 def qt_original_family(page,name,text,owner=None):
+    # CoreText accepts raw Type1 buffers but can paint their glyphs as empty.
+    # Use the native standard face for preview; PDF writing still uses Base14.
+    if sys.platform=="darwin":
+        key=font_key(name)
+        for fullname in fitz.Base14_fontdict.values():
+            if key==font_key(fullname):
+                if fullname.startswith("Helvetica"): return "Helvetica"
+                if fullname.startswith("Times"): return "Times"
+                if fullname.startswith("Courier"): return "Courier"
+                return fullname
     from .text_edit import resolve_font
     face=resolve_font(page,name,text).font
     raw=face.buffer

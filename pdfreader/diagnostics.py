@@ -59,6 +59,7 @@ def smoke(directory):
         output["ok"] = not errors
         (root / "result.json").write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
         for session in window.sessions:
+            session.view.finish_inline_text(cancel=True)
             session.document.saved_state = session.document.state
         window.close()
         app.quit()

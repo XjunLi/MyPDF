@@ -222,23 +222,33 @@ class PdfDocument:
         if not found: return None
         region=self.text_region(page,found[0])
         if region.invisible: return region
-        for block in p.get_text("dict",flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]:
-            lines=block.get("lines",[])
-            index=next((i for i,line in enumerate(lines) if fitz.Rect(line["bbox"]).contains(fitz.Point(point))),None)
-            if index is None: continue
-            first=last=index
-            def adjacent(a,b):
-                x,y=fitz.Rect(a["bbox"]),fitz.Rect(b["bbox"])
-                return abs(x.x0-y.x0)<4 and 0<y.y0-x.y0<max(x.height,y.height)*2 and abs(a["spans"][0]["size"]-b["spans"][0]["size"])<1
-            while first>0 and adjacent(lines[first-1],lines[first]): first-=1
-            while last+1<len(lines) and adjacent(lines[last],lines[last+1]): last+=1
-            if first!=last:
-                box=fitz.Rect(lines[first]["bbox"])
-                for line in lines[first+1:last+1]: box|=fitz.Rect(line["bbox"])
-                # Keep the original line's right margin, stopping before columns.
-                box.x1=max(box.x1,found[0].x1)
-                region=self.text_region(page,box)
-            return region
+        all_lines=[line for block in p.get_text("dict",flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]
+                   for line in block.get("lines",[]) if line.get("spans")]
+        selected=next((line for line in all_lines if fitz.Rect(line["bbox"]).contains(fitz.Point(point))),None)
+        if not selected: return region
+        box=fitz.Rect(selected["bbox"]); size=selected["spans"][0]["size"]
+        direction=tuple(selected.get("dir",(1,0)))
+        lines=[line for line in all_lines if abs(line["bbox"][0]-box.x0)<4
+               and abs(line["spans"][0]["size"]-size)<1 and tuple(line.get("dir",(1,0)))==direction]
+        lines.sort(key=lambda line:line["bbox"][1])
+        index=next(i for i,line in enumerate(lines) if line is selected)
+        first=last=index
+        def adjacent(a,b):
+            x,y=fitz.Rect(a["bbox"]),fitz.Rect(b["bbox"])
+            return 0<y.y0-x.y0<max(x.height,y.height)*1.65
+        while first>0 and adjacent(lines[first-1],lines[first]): first-=1
+        while last+1<len(lines) and adjacent(lines[last],lines[last+1]): last+=1
+        if first!=last:
+            box=fitz.Rect(lines[first]["bbox"])
+            for line in lines[first+1:last+1]: box|=fitz.Rect(line["bbox"])
+            right=found[0].x1
+            selected_ids={id(line) for line in lines[first:last+1]}
+            for line in all_lines:
+                other=fitz.Rect(line["bbox"])
+                if id(line) not in selected_ids and other.y0<box.y1 and other.y1>box.y0 and other.x0>=box.x1-.5:
+                    right=min(right,other.x0-4)
+            box.x1=max(box.x1,right)
+            region=self.text_region(page,box)
         return region
 
     def edit_text_box(self,page,region,text,fontname=None,size=None,color=None,styles=None,offset=(0,0)):

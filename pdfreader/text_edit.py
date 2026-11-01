@@ -205,7 +205,7 @@ def mapped_glyphs(region,replacement):
     return result
 
 
-def replacement_plan(page, region, text, mapped_override=None):
+def replacement_plan(page, region, text, mapped_override=None, resolver=None):
     if not region.glyphs or region.invisible:
         raise TextEditError("选区没有可编辑的可见文字。扫描页请使用扫描件覆写，并选择替代字体。")
     mapped = mapped_override if mapped_override is not None else mapped_glyphs(region,text)
@@ -213,7 +213,7 @@ def replacement_plan(page, region, text, mapped_override=None):
     for char, glyph in zip(text, mapped):
         if char != "\n" and glyph:
             by_font[glyph.style.font] = by_font.get(glyph.style.font, "") + char
-    fonts = {name: resolve_font(page, name, chars) for name, chars in by_font.items()}
+    fonts = {name: (resolver(name,chars) if resolver else resolve_font(page,name,chars)) for name,chars in by_font.items()}
     box = fitz.Rect(region.rect) + (-.8, -.8, .8, .8)
     plan, cursor = [], 0
     for n, line_text in enumerate(text.split("\n")):
@@ -301,7 +301,7 @@ def editing_bounds(page,region):
     return box
 
 
-def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_override=None):
+def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_override=None,resolver=None):
     from dataclasses import replace
     original=region
     if size is not None or color is not None:
@@ -317,7 +317,7 @@ def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_
     bounds=fitz.Rect(bounds_override) if bounds_override is not None else editing_bounds(page,original)
     # Orthogonal vertical text retains the established replacement path.
     if any(abs(line.direction[1])>.01 for line in region.lines):
-        return replacement_plan(page,region,text)
+        return replacement_plan(page,region,text,resolver=resolver)
     mapped=mapped_glyphs(region,text)
     if styles is not None:
         if len(styles)!=len(text): raise TextEditError("文字样式数量与内容不符。")
@@ -332,7 +332,7 @@ def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_
     for char,glyph in zip(text,mapped):
         if glyph and char!="\n":
             fonts[glyph.style.font]=fonts.get(glyph.style.font,"")+char
-    resolved={name:resolve_font(page,name,chars) for name,chars in fonts.items()}
+    resolved={name:(resolver(name,chars) if resolver else resolve_font(page,name,chars)) for name,chars in fonts.items()}
     lines=[]; current=[]; advances=[]; mapped_lines=[]; current_maps=[]
     for char,glyph in zip(text,mapped):
         if char=="\n":
@@ -369,4 +369,4 @@ def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_
     for number,line in enumerate(mapped_lines):
         if number: wrapped.append(None)
         wrapped.extend(line)
-    return replacement_plan(page,expanded,"\n".join(lines),mapped_override=wrapped)
+    return replacement_plan(page,expanded,"\n".join(lines),mapped_override=wrapped,resolver=resolver)

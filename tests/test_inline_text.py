@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import pymupdf as fitz
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor,QInputMethodEvent
+from PySide6.QtGui import QColor,QInputMethodEvent,QTextCursor
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from pdfreader.app import MainWindow
@@ -190,3 +190,24 @@ def test_native_editor_undo_and_bounded_paste(reader,qapp):
     mime=QMimeData(); mime.setText("x"*25001)
     editor.input.insertFromMimeData(mime)
     assert editor.input.toPlainText()==before
+
+
+def test_fragmented_paragraph_stays_in_column_and_font_preview_is_reused(reader,qapp):
+    page=reader.document.doc.new_page(width=500,height=700)
+    for y,text in ((50,"First paragraph line."),(68,"Second paragraph line."),(86,"Third paragraph line.")):
+        page.insert_text((40,y),text,fontsize=11)
+    page.insert_text((300,68),"Other column",fontsize=11)
+    page.insert_text((40,150),"Separate paragraph",fontsize=11)
+    reader.after_change()
+    reader.edit_at(reader.document.count-1,(70,47))
+    editor=reader.view.inline_editor
+    assert editor is not None
+    assert "Third paragraph line." in editor.original_text
+    assert "Other column" not in editor.original_text and "Separate paragraph" not in editor.original_text
+    assert editor.preview_fonts
+    face=next(iter(editor.preview_fonts.values()))[0]
+    editor.input.moveCursor(QTextCursor.MoveOperation.End)
+    QTest.keyClicks(reader.view," more")
+    assert next(iter(editor.preview_fonts.values()))[0] is face
+    reader.view.finish_inline_text(cancel=True)
+    assert not editor.preview_fonts

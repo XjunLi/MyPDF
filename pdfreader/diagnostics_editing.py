@@ -17,6 +17,13 @@ def exercise_editing(window,root,output):
         page.insert_text((50,150),"Select text, choose a color, and keep reading.",fontsize=12)
         doc.save(fixture)
     window.open_file(fixture); window.toggle_panel(None); window.view.fit_page(); app.processEvents()
+    def inline_metrics(editor):
+        widget=editor.input
+        paint=widget.document().documentLayout().paintDevice()
+        return {"widget_dpi":widget.logicalDpiY(),"layout_dpi":paint.logicalDpiY() if paint else None,
+                "font_pt":widget.document().defaultFont().pointSizeF(),"family":widget.document().defaultFont().family(),"width":widget.width(),"height":widget.height(),
+                "wrapped_lines":widget.document().firstBlock().layout().lineCount(),
+                "vertical_scroll":widget.verticalScrollBar().maximum()}
     def click(point):
         page=window.document.doc[0]
         local=fitz.Point(point)*page.rotation_matrix
@@ -29,6 +36,11 @@ def exercise_editing(window,root,output):
     QTest.keyClicks(window.view,"Edited heading")
     assert editor.input.toPlainText()=="Edited heading",repr(editor.input.toPlainText())
     app.processEvents(); window.grab().save(str(root/"editing-original.png"))
+    output.setdefault("inline_metrics",{})["original"]=inline_metrics(editor)
+    pixels=editor.input.grab().toImage()
+    blue=sum(1 for y in range(pixels.height()) for x in range(pixels.width())
+             if (c:=pixels.pixelColor(x,y)).alpha()>100 and c.blue()>c.red()+25 and c.blue()>c.green()+15)
+    assert blue>20,f"Original editor did not paint its blue text: {blue}, {inline_metrics(editor)}"
     QTest.keyClick(window.view,Qt.Key.Key_Return,Qt.KeyboardModifier.ControlModifier)
     assert window.view.inline_editor is None
     assert window.document.doc[0].search_for("Edited heading")
@@ -43,6 +55,9 @@ def exercise_editing(window,root,output):
     QApplication.sendEvent(window.view,event)
     assert "中文" in editor.input.toPlainText()
     app.processEvents(); window.grab().save(str(root/"editing-insert.png"))
+    output.setdefault("inline_metrics",{})["insert"]=inline_metrics(editor)
+    assert editor.input.document().firstBlock().layout().lineCount()==1,f"Short insertion unexpectedly wrapped: {inline_metrics(editor)}"
+    assert editor.input.verticalScrollBar().maximum()==0,f"Short insertion was clipped: {inline_metrics(editor)}"
     assert window.view.finish_inline_text()
     assert window.document.doc[0].search_for("中文")
     output["checks"].append("click_insert_native_ime_auto_size_and_subset_fonts")
