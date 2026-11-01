@@ -203,6 +203,10 @@ class ReaderLayout:
         self.panel_actions = {}
         for key, label in [("ai", "AI 助手"), ("comment", "批注列表")]:
             self.panel_actions[key] = self.toolbar_action(self.top, key, label, lambda checked=False, k=key: self.toggle_panel(k), checkable=True)
+        # Hidden until the startup check finds something newer on GitHub.
+        self.update_action = self.toolbar_action(self.top, "update", "有可用更新", self.install_update)
+        self.update_action.setIcon(icon("update", "#285bbc"))
+        self.update_action.setVisible(False)
         self.toolbar_right_space = QWidget()
         self.toolbar_right_space.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.top.addWidget(self.toolbar_right_space)

@@ -4,9 +4,9 @@ import os
 import sys
 
 import pymupdf as fitz
-from PySide6.QtCore import Qt, QSize, QTimer, QProcess, QTemporaryDir
+from PySide6.QtCore import Qt, QSize, QTimer, QProcess, QTemporaryDir, QUrl
 from PySide6.QtGui import (QAction, QActionGroup, QIcon, QImage, QPixmap, QKeySequence,
-    QPainter, QPageLayout)
+    QPainter, QPageLayout, QDesktopServices)
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QToolBar, QSplitter, QTabWidget, QStackedWidget,
     QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QLineEdit, QSpinBox,
@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QDialog, QDialogButtonBox, QFormLayout, QPlainTextEdit)
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
-from . import __version__
+from . import __version__, updates
 from .engine import PdfDocument, PdfError, PasswordRequired, parse_page_range
 from .viewer import PdfView
 from .dialogs import TextDialog, SignatureDialog, CommentDialog
@@ -132,6 +132,9 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.plugin_menu = extension.addMenu("AI 服务预设")
         help_menu = self.root_menu.addMenu("帮助")
         help_menu.addAction(self.action("使用说明与功能范围", self.show_help, "F1"))
+        self.auto_update = self.action("自动检查更新", self.toggle_auto_update, checkable=True)
+        self.auto_update.setChecked(self.settings.values.get("auto_update_check", True))
+        help_menu.addAction(self.auto_update)
 
     def set_mode(self, mode, hint):
         if not self.view.finish_inline_text():
@@ -923,10 +926,49 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
                 "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；DeepSeek 自动将 PDF 转为逐页文字与图片；其他服务不支持 PDF 时可改用全文文字。被截断的回答可点击继续。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
                 "聊天记录：SQLite 自动保存到本机，系统账户保护的本机加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"
+                "更新：启动时检查 GitHub，有新版本时工具栏右侧出现蓝色下载按钮。源码运行会拉取更新并重启，安装版打开下载页。可在“帮助 → 自动检查更新”关闭。\n\n"
                 "范围：本版本提供主要阅读与编辑流程。暂不包含证书签章、PDF/A 校验、XFA、专业印前处理及 Word 排版转换。")
         if sys.platform == "darwin":
             text = text.replace("Ctrl+", "⌘+")
         QMessageBox.information(self, "使用说明", text)
+
+    def toggle_auto_update(self, enabled):
+        self.settings.values["auto_update_check"] = enabled
+        try:
+            self.settings.save()
+        except Exception as exc:
+            self.error(exc)
+
+    def check_updates(self):
+        if self.settings.values.get("auto_update_check", True):
+            self.update_job = updates.Background(updates.check, self.update_checked, self)
+
+    def update_checked(self, summary, error):
+        # Offline or GitHub unreachable: stay quiet, the next launch checks again.
+        if summary:
+            self.update_summary = summary
+            self.update_action.setToolTip(summary + "，点击更新")
+            self.update_action.setVisible(True)
+
+    def install_update(self):
+        if not updates.source_checkout():
+            QDesktopServices.openUrl(QUrl(updates.RELEASES_URL))
+            return
+        if QMessageBox.question(self, "更新", self.update_summary + "。现在更新吗？") != QMessageBox.StandardButton.Yes:
+            return
+        self.update_action.setEnabled(False)
+        self.status_label.setText("正在更新…")
+        self.update_job = updates.Background(updates.apply, self.update_applied, self)
+
+    def update_applied(self, _, error):
+        self.update_action.setEnabled(True)
+        if error:
+            QMessageBox.warning(self, "更新失败", error)
+            return
+        self.update_action.setVisible(False)
+        if (QMessageBox.question(self, "更新完成", "已更新到最新版本，重启后生效。现在重启吗？") == QMessageBox.StandardButton.Yes
+                and self.close()):
+            QProcess.startDetached(sys.executable, [str(updates.ROOT / "main.py")] + sys.argv[1:])
 
     def closeEvent(self, event):
         # Collect decisions before closing any tab, so Cancel keeps the entire
@@ -971,6 +1013,7 @@ def run(filenames=None):
     window = MainWindow()
     window.show()
     file_router.set_window(window)
+    QTimer.singleShot(2000, window.check_updates)
     if filenames:
         paths = [filenames] if isinstance(filenames, (str, Path)) else filenames
         QTimer.singleShot(0, lambda: window.open_files(paths))

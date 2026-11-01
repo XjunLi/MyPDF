@@ -32,6 +32,7 @@ PATHS = {
     "sidebar": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
     "pages": '<path d="M8 3h12v15H8zM4 7v15h12"/>',
     "outline": '<path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/>',
+    "update": '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
     "ai": '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3ZM20 2v4M18 4h4"/>',
     "close": '<path d="m6 6 12 12M6 18 18 6"/>',
     "copy": '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',

@@ -316,6 +316,7 @@ def test_toolbar_is_centered_without_brand_and_tabs_stay_usable_when_full(reader
     reader.resize(1000, 700)
     for n in range(7):
         reader.open_file(another_pdf(pdf_path, tmp_path, f"{n} - a very long document filename for tab overflow.pdf"))
+    reader.update_action.setVisible(True)  # Worst case: the update button also fits.
     qapp.processEvents()
     assert not any(label.text() == "PDF Reader" for label in reader.top.findChildren(QLabel))
     assert reader.top.widgetForAction(reader.mode_actions["hand"]) is None
