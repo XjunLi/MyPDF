@@ -30,3 +30,18 @@ def legacy_data_root():
 
 def tessdata_path() -> Path:
     return resource_root() / "assets" / "tessdata"
+
+
+def canonical_document_path(value):
+    path = Path(value).resolve()
+    if sys.platform == "darwin":
+        # APFS may be case-sensitive or case-insensitive. Fold only when this
+        # existing file proves both spellings refer to the same filesystem entry.
+        alternate = path.with_name(path.name.swapcase())
+        try:
+            if alternate.name != path.name and path.samefile(alternate):
+                import unicodedata
+                return unicodedata.normalize("NFC", str(path)).casefold()
+        except OSError:
+            pass
+    return os.path.normcase(str(path))

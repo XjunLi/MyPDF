@@ -80,16 +80,19 @@ def smoke(directory):
                 assert window.top.widgetForAction(window.ocr_action) is None
                 assert not window.mode_actions["highlight"].isEnabled()
                 output["checks"].append("selection_only_highlight_and_hidden_ocr_button")
+                from .diagnostics_fixtures import editable_chinese
+                style_doc = editable_chinese(root / "chinese-style.pdf")
                 phrase = "让批注成为线索"
-                r = window.document.doc[0].search_for(phrase)[0]
-                box, _ = window.document.text_block_at(0, (r.tl + r.br) / 2)
-                region = window.document.text_region(0, box)
+                r = style_doc.doc[0].search_for(phrase)[0]
+                box, _ = style_doc.text_block_at(0, (r.tl + r.br) / 2)
+                region = style_doc.text_region(0, box)
                 original_style = region.primary_style
-                window.document.replace_text(0, region, "让批注留下线索")
-                changed = window.document.text_region(0, box)
+                style_doc.replace_text(0, region, "让批注留下线索")
+                changed = style_doc.text_region(0, box)
                 assert normalized_font(changed.primary_style.font) == normalized_font(original_style.font)
                 assert abs(changed.primary_style.size - original_style.size) < .01
                 assert changed.primary_style.color == original_style.color
+                style_doc.close()
                 output["checks"].append("chinese_edit_preserves_font_size_and_color")
                 window.after_change()
                 window.view.fit_page()

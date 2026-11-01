@@ -11,6 +11,7 @@ from .engine import PdfDocument, PdfError, PasswordRequired
 from .viewer import PdfView
 from .icons import icon_button
 from .chat_store import document_key
+from .paths import canonical_document_path
 
 
 @dataclass(eq=False)
@@ -180,7 +181,7 @@ class DocumentTabs:
 
     @staticmethod
     def path_key(path):
-        return os.path.normcase(str(Path(path).resolve()))
+        return canonical_document_path(path)
 
     def session_for_path(self, path):
         key = self.path_key(path)

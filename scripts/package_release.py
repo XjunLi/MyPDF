@@ -32,6 +32,9 @@ report = {"version":__version__,"commit":commit,"system":platform.system(),"syst
           "tests":counts,"source":source,"packaged":packaged,
           "encryption":"macOS Keychain + AES-256-GCM" if mac else "Windows DPAPI",
           "real_ai_service_called":False,"apple_notarized":False if mac else None}
+if mac:
+    report["native_cocoa"] = json.loads((root/"work/smoke-native/result.json").read_text(encoding="utf-8"))
+    assert report["native_cocoa"]["ok"]
 validation = output/f"PDFReader-validation-{label}.json"
 validation.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 destination = output/f"PDFReader-{label}.zip"

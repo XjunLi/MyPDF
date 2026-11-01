@@ -105,9 +105,9 @@ def test_embedded_font_is_reused_for_replacement(tmp_path):
     doc.close()
 
 
-def test_chinese_subset_edit_keeps_heading_style_and_excludes_section_number():
-    doc = PdfDocument()
-    doc.open(Path(__file__).resolve().parents[1] / "samples" / "welcome.pdf")
+def test_chinese_edit_keeps_heading_style_and_excludes_section_number(tmp_path):
+    from pdfreader.diagnostics_fixtures import editable_chinese
+    doc = editable_chinese(tmp_path / "chinese-style.pdf")
     phrase = "让批注成为线索"
     rect = doc.doc[0].search_for(phrase)[0]
     box, text = doc.text_block_at(0, (rect.tl + rect.br) / 2)

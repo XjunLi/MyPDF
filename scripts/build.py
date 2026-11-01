@@ -15,7 +15,14 @@ DOCS = ("README.md", "LICENSE", "THIRD_PARTY.md", "CHANGELOG.md", "DEVELOPMENT.m
 
 
 def run(*args, **kwargs):
-    subprocess.run([str(a) for a in args], cwd=ROOT, check=True, **kwargs)
+    try:
+        subprocess.run([str(a) for a in args], cwd=ROOT, check=True, **kwargs)
+    except subprocess.CalledProcessError:
+        if "--smoke-test" in args:
+            result = Path(args[args.index("--smoke-test") + 1]) / "result.json"
+            if result.exists():
+                print(result.read_text(encoding="utf-8"), flush=True)
+        raise
 
 
 def licenses():
@@ -87,7 +94,10 @@ def main():
             shutil.copytree(ROOT/name,app/name,dirs_exist_ok=True)
         shutil.copy2(ROOT/"work/PDFReader-source.zip",app/"PDFReader-source.zip")
     run(executable,"--smoke-test",ROOT/"work/smoke-packaged",timeout=180)
-    for name in ("source","packaged"):
+    if sys.platform == "darwin":
+        native_env = dict(os.environ, QT_QPA_PLATFORM="cocoa", QT_SCALE_FACTOR="2")
+        run(executable,"--smoke-test",ROOT/"work/smoke-native",timeout=180,env=native_env)
+    for name in (("source","packaged","native") if sys.platform == "darwin" else ("source","packaged")):
         result = json.loads((ROOT/f"work/smoke-{name}/result.json").read_text(encoding="utf-8"))
         if not result["ok"]:
             raise SystemExit(f"{name} smoke failed: {result['errors']}")

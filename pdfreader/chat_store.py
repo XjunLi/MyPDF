@@ -9,11 +9,11 @@ import sqlite3
 import uuid
 
 from .config import protect
-from .paths import data_root
+from .paths import data_root, canonical_document_path
 
 
 def document_key(path=None, session_key=None):
-    identity = os.path.normcase(str(Path(path).resolve())) if path else "untitled:" + (session_key or "general")
+    identity = canonical_document_path(path) if path else "untitled:" + (session_key or "general")
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
