@@ -9,6 +9,8 @@ from .viewer import PdfView
 from .panels import AIPanel
 from .paths import resource_root
 from .application import shortcut_text
+from .color_tools import add_palette
+from PySide6.QtGui import QColor
 
 
 class ReadingNotice(QLabel):
@@ -107,7 +109,11 @@ class ReaderLayout:
         menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.top.addWidget(menu_button)
         self.open_action = self.toolbar_action(self.top, "open", "打开 PDF", self.open_dialog, "Ctrl+O")
-        self.save_action = self.toolbar_action(self.top, "save", "保存", self.save, "Ctrl+S", document=True)
+        self.save_action = self.toolbar_action(None, "save", "保存", self.save, "Ctrl+S", document=True)
+        self.save_as_action=self.action("另存为…",lambda:self.save(True),"Ctrl+Shift+S",document=True)
+        self.save_button=split_tool_button(self.save_action)
+        self.save_menu=QMenu(self); self.save_menu.addAction(self.save_action); self.save_menu.addAction(self.save_as_action)
+        self.save_button.setMenu(self.save_menu); self.top.addWidget(self.save_button)
         self.top.addSeparator()
         self.undo_action = self.toolbar_action(self.top, "undo", "撤销", self.undo, "Ctrl+Z", edit=True)
         self.redo_action = self.toolbar_action(self.top, "redo", "重做", self.redo, "Ctrl+Shift+Z", edit=True)
@@ -122,11 +128,11 @@ class ReaderLayout:
             ("underline", "下划线", "为所选文字添加下划线"),
             ("strike", "删除线", "为所选文字添加删除线"),
             ("comment", "注释", "有选区时注释文字；没有选区时单击页面放置便笺"),
-            ("text", "添加文字", "拖出文字框"),
+            ("text", "添加文字", "单击放置文字框，直接输入并自动扩展"),
             ("edit", "编辑文字", "点击文字行；拖框可编辑多行"),
             ("image", "插入图片", "拖出图片放置框"),
             ("ink", "画笔", "在页面上绘制"),
-            ("signature", "手写签名", "拖出签名位置，再书写签名"),
+            ("signature", "签名", "单击放置；支持手写、键入姓名和导入图片"),
         ]
         for mode, label, hint in modes:
             selectable = mode not in ("highlight", "underline", "strike")
@@ -135,13 +141,15 @@ class ReaderLayout:
             if selectable:
                 self.tool_group.addAction(a)
             self.mode_actions[mode] = a
-            if mode in ("highlight", "text"):
+            if mode in ("highlight", "text", "ink"):
                 button = split_tool_button(a)
                 self.top.addWidget(button)
                 if mode == "highlight":
                     self.markup_button = button
-                else:
+                elif mode=="text":
                     self.insert_button = button
+                else:
+                    self.ink_button = button
             elif mode not in ("hand", "underline", "strike", "image"):
                 self.top.addAction(a)
         for button, group in [(self.markup_button, ("highlight", "underline", "strike")), (self.insert_button, ("text", "image"))]:
@@ -149,6 +157,23 @@ class ReaderLayout:
             for mode in group:
                 menu.addAction(self.mode_actions[mode])
             button.setMenu(menu)
+        self.highlight_color=QColor(self.settings.values.get("highlight_color","#ffc33a"))
+        self.ink_color=QColor(self.settings.values.get("ink_color","#25364c"))
+        if not self.highlight_color.isValid(): self.highlight_color=QColor("#ffc33a")
+        if not self.ink_color.isValid(): self.ink_color=QColor("#25364c")
+        try: self.ink_width=max(.3,min(10,float(self.settings.values.get("ink_width",1.1))))
+        except (ValueError,TypeError): self.ink_width=1.1
+        self.markup_button.menu().addSeparator()
+        add_palette(self.markup_button.menu(),self,lambda:self.highlight_color,lambda color:self.set_annotation_color("highlight",color))
+        ink_menu=QMenu(self); self.ink_button.setMenu(ink_menu)
+        add_palette(ink_menu,self,lambda:self.ink_color,lambda color:self.set_annotation_color("ink",color))
+        ink_menu.addSeparator()
+        widths=QActionGroup(self)
+        for width in (.7,1.1,2.,4.):
+            action=ink_menu.addAction(f"{width:g} pt"); action.setCheckable(True); action.setChecked(width==self.ink_width)
+            widths.addAction(action); action.triggered.connect(lambda checked=False,w=width:self.set_ink_width(w))
+        self.mode_actions["highlight"].setIcon(icon("highlight",self.highlight_color.name()))
+        self.mode_actions["ink"].setIcon(icon("ink",self.ink_color.name()))
         self.mode_actions["select"].setChecked(True)
         self.top.addSeparator()
         self.ocr_action = self.toolbar_action(None, "ocr", "识别扫描页", lambda: self.start_ocr(), edit=True)

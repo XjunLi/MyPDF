@@ -76,6 +76,7 @@ def main():
     if not args.skip_tests:
         run(sys.executable,"-m","pytest","tests","-q","--basetemp=work/pytest","-o","cache_dir=work/pytest-cache","--junitxml=work/tests.xml")
     run(sys.executable,"main.py","--smoke-test","work/smoke-source",timeout=180)
+    run(sys.executable,"main.py","--performance-test","work/performance-source",timeout=180)
     licenses()
     run("git","archive","--format=zip","--prefix=PDFReader-source/","-o","work/PDFReader-source.zip","HEAD")
     if sys.platform == "darwin":
@@ -97,6 +98,9 @@ def main():
     if sys.platform == "darwin":
         native_env = dict(os.environ, QT_QPA_PLATFORM="cocoa", QT_SCALE_FACTOR="2")
         run(executable,"--smoke-test",ROOT/"work/smoke-native",timeout=180,env=native_env)
+    run(executable,"--performance-test",ROOT/"work/performance-packaged",timeout=180)
+    if sys.platform=="darwin":
+        run(executable,"--performance-test",ROOT/"work/performance-native",timeout=180,env=native_env)
     for name in (("source","packaged","native") if sys.platform == "darwin" else ("source","packaged")):
         result = json.loads((ROOT/f"work/smoke-{name}/result.json").read_text(encoding="utf-8"))
         if not result["ok"]:

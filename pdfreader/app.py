@@ -92,7 +92,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         file.addAction(self.action("新建", self.new_document, "Ctrl+N"))
         file.addAction(self.open_action)
         file.addAction(self.save_action)
-        file.addAction(self.action("另存为…", lambda: self.save(True), "Ctrl+Shift+S", document=True))
+        file.addAction(self.save_as_action)
         file.addSeparator()
         file.addAction(self.action("导出指定页面…", self.export_pages, document=True))
         file.addAction(self.action("当前页导出为 PNG…", self.export_image, document=True))
@@ -105,6 +105,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         edit.addAction(self.undo_action)
         edit.addAction(self.redo_action)
         edit.addAction(self.search_action)
+        edit.addAction(self.action("字体库…",self.open_font_library))
         edit.addAction(self.action("填写当前页表单…", self.fill_form, document=True))
         page = self.root_menu.addMenu("页面")
         page.addAction(self.action("顺时针旋转 90°", lambda: self.mutate(lambda: self.document.rotate(self.view.current_page)), "Ctrl+R", edit=True))
@@ -133,6 +134,9 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         help_menu.addAction(self.action("使用说明与功能范围", self.show_help, "F1"))
 
     def set_mode(self, mode, hint):
+        if not self.view.finish_inline_text():
+            self.mode_actions[self.view.mode].setChecked(True)
+            return
         if mode in ("highlight", "underline", "strike"):
             self.markup_button.setDefaultAction(self.mode_actions[mode])
             if self.view.text_boxes:
@@ -153,16 +157,32 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.view.set_mode(mode)
         self.status_label.setText(hint)
 
+    def set_annotation_color(self,kind,color):
+        from .icons import icon
+        setattr(self,"highlight_color" if kind=="highlight" else "ink_color",color)
+        self.settings.values[kind+"_color"]=color.name()
+        self.mode_actions[kind].setIcon(icon(kind,color.name()))
+        self.view.ink_color=self.ink_color
+        try: self.settings.save()
+        except Exception as exc: self.status_label.setText("颜色设置保存失败："+str(exc))
+
+    def set_ink_width(self,width):
+        self.ink_width=width; self.view.ink_width=width
+        self.settings.values["ink_width"]=width
+        try: self.settings.save()
+        except Exception as exc: self.status_label.setText("画笔设置保存失败："+str(exc))
+
     def apply_markup(self, kind, groups):
         if groups:
-            self.mutate(lambda: self.document.add_markup_ranges(groups, kind))
+            color=self.highlight_color
+            self.mutate(lambda: self.document.add_markup_ranges(groups,kind,(color.redF(),color.greenF(),color.blueF())))
 
     def comment_selection(self, groups, quote):
         if not groups:
             return
         dialog = CommentDialog(self, quote=quote)
         if dialog.exec() and dialog.text.toPlainText().strip():
-            self.mutate(lambda: self.document.add_markup_ranges(groups, content=dialog.text.toPlainText().strip()))
+            self.mutate(lambda: self.document.add_markup_ranges(groups,color=(self.highlight_color.redF(),self.highlight_color.greenF(),self.highlight_color.blueF()),content=dialog.text.toPlainText().strip()))
             self.show_panel("comment")
 
     def focus_annotation(self, page, xref):
@@ -268,6 +288,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         enabled = bool(self.document.count and self.view.text_boxes and self.document.doc.permissions & fitz.PDF_PERM_ANNOTATE)
         for kind in ("highlight", "underline", "strike"):
             self.mode_actions[kind].setEnabled(enabled)
+        self.markup_button.setEnabled(True)  # The palette stays available before selecting text.
         self.mode_actions["comment"].setText("注释所选文字" if self.view.text_boxes else "添加便笺")
 
     def error(self, exc):
@@ -291,18 +312,25 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         if self.search_bar.isVisible() and self.search_input.text().strip():
             self.search_timer.start()
 
-    def mutate(self, function):
+    def mutate(self, function, preserve_draft=False):
         if not self.document.count:
-            return
+            return False
+        if not preserve_draft and not self.view.finish_inline_text(): return False
         resume_ocr = (self.ocr_process is not None and self.auto_ocr.isChecked()
                       and (not self.ocr_cancelled or self.ocr_pending_open == self.document_epoch))
         self.cancel_ocr()
         try:
             function()
+            if preserve_draft: self.view.dismiss_inline_text()
             self.after_change()
+            return True
         except Exception as exc:
-            self.after_change()
-            self.error(exc)
+            if preserve_draft:
+                self.view.inline_editor.show_error(str(exc))
+            else:
+                self.after_change()
+                self.error(exc)
+            return False
         finally:
             if resume_ocr:
                 if self.ocr_process is not None:
@@ -438,6 +466,17 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         info = self.ai_document_info()
         return build_document_context(self.document, info["name"], info["source_session"], mode)
 
+    def insert_inline_text(self,page,payload):
+        function=self.document.edit_text_box if "region" in payload else self.document.insert_text_box
+        if self.mutate(lambda:function(page,**payload),preserve_draft=True):
+            self.view.set_mode("select")
+            self.mode_actions["select"].setChecked(True)
+            self.schedule_auto_ocr()
+
+    def open_font_library(self):
+        from .font_library import FontLibraryDialog
+        FontLibraryDialog(self).exec()
+
     def region_chosen(self, mode, page, rect):
         if mode in ("highlight", "underline", "strike"):
             self.mutate(lambda: self.document.add_markup(page, rect, mode))
@@ -448,16 +487,25 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 self.show_panel("comment")
             self.view.clear_selection()
             self.set_mode("select", "拖动选择文字")
-        elif mode in ("text", "edit"):
-            old = self.document.selection_text(page, rect) if mode == "edit" else ""
-            self.text_dialog(page, rect, old, mode == "edit")
+        elif mode=="edit":
+            region=self.document.text_region(page,rect)
+            if region.invisible: self.text_dialog(page,rect,region.text,True)
+            elif region.glyphs: self.view.begin_inline_edit(page,region)
+        elif mode=="text":
+            self.view.begin_inline_text(page,fitz.Rect(rect).tl)
         elif mode == "signature":
             dialog = SignatureDialog(self)
             if dialog.exec():
                 p = self.document.doc[page]
                 r = fitz.Rect(rect) * p.rotation_matrix
-                strokes = [[tuple(fitz.Point(r.x0 + x * r.width, r.y0 + y * r.height) * p.derotation_matrix) for x, y in s] for s in dialog.pad.normalized()]
-                self.mutate(lambda: self.document.add_ink(page, strokes, signature=True))
+                if dialog.tabs.currentIndex()==0:
+                    strokes = [[tuple(fitz.Point(r.x0 + x * r.width, r.y0 + y * r.height) * p.derotation_matrix) for x, y in s] for s in dialog.pad.normalized()]
+                    self.mutate(lambda:self.document.add_ink(page,strokes,signature=True,color=dialog.rgb()))
+                elif dialog.tabs.currentIndex()==1:
+                    self.mutate(lambda:self.document.add_typed_signature(page,rect,dialog.name.text().strip(),dialog.signature_font.currentData(),dialog.rgb()))
+                else:
+                    self.mutate(lambda:self.document.add_image(page,rect,dialog.image_path))
+                self.set_mode("select","拖动选择文字")
         elif mode == "image":
             filename, _ = QFileDialog.getOpenFileName(self, "插入图片", "", "图片 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
             if filename:
@@ -465,7 +513,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
 
     def text_dialog(self, page, rect, text, editing):
         region = self.document.text_region(page, rect) if editing else None
-        dialog = TextDialog(self, region.text if region else text, editing, region=region)
+        dialog = TextDialog(self, region.text if region else text, editing, region=region,pdf_page=self.document.doc[page])
         if dialog.exec():
             if editing and dialog.preserve.isChecked():
                 self.mutate(lambda: self.document.replace_text(page, region, dialog.text.toPlainText()))
@@ -474,11 +522,12 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                     dialog.raster_replace.isChecked(), color=dialog.rgb(), fontname=dialog.font.currentData()))
 
     def edit_at(self, page, point):
-        block = self.document.text_block_at(page, point)
-        if block:
-            self.text_dialog(page, block[0], block[1], True)
+        region=self.document.paragraph_at(page,point)
+        if region:
+            if region.invisible: self.text_dialog(page,region.rect,region.text,True)
+            else: self.view.begin_inline_edit(page,region)
         else:
-            self.status_label.setText("这里没有文字块；扫描页请先 OCR，或使用「加文字」绘制文字框。")
+            self.status_label.setText("这里没有文字块；扫描页请先 OCR，或使用「加文字」单击放置文字框。")
 
     def update_comments(self):
         self.comment_list.clear()
@@ -865,9 +914,9 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         text = ("PDF Reader " + __version__ + "\n\n"
                 "多文档：可一次打开或拖入多份 PDF；两份起在底部左侧显示标签，支持拖动排序。Ctrl+Tab 切换，Ctrl+W 关闭当前文档。各自保留位置、缩放、撤销和 AI 会话。\n\n"
                 "阅读：默认选择文字，滚轮连续滚动，Ctrl+滚轮缩放；抓手在菜单“视图 → 阅读工具”中。左侧缩略图与目录跳页；Ctrl+F 搜索。\n\n"
-                "批注：先划词，再点高亮或注释。没有选区时，注释工具单击页面放置便笺；右侧双击可修改备注。\n\n"
-                "编辑：加文字/插图先拖框；改文字点击文字行或拖框。默认保留原字体、字号和颜色；无法匹配原字体时会提示。复杂排版不会自动重排。\n\n"
-                "签名：拖出放置框后手写。保存的是可见笔迹，不是证书数字签名。\n\n"
+                "批注：高亮和画笔旁的箭头可选颜色、画笔粗细。先划词，再点高亮或注释。没有选区时，注释工具单击页面放置便笺；右侧双击可修改备注。\n\n"
+                "编辑：加文字单击放置，直接输入并随内容扩展；插图先拖框。改文字点击文字行或拖框。默认保留原字体、字号和颜色；无法匹配原字体时会提示。复杂排版不会自动重排。\n\n"
+                "签名：单击放置或拖框选择区域，可手写、键入姓名或导入 PNG / JPEG。保存的是可见内容，不是证书数字签名。\n\n"
                 "OCR：内置中英识别，当前文档的扫描页默认自动识别，结果需保存。切换标签会停止当前识别，切回后自动重新识别未完成的页面。\n\n"
                 "AI：在侧栏右上角 … 配置连接。回复支持 Markdown。新对话默认整份 PDF 背景 + 当前页截图 + 选区，只在点击发送时请求服务。每轮携带全文和最近对话；DeepSeek 自动将 PDF 转为逐页文字与图片；其他服务不支持 PDF 时可改用全文文字。被截断的回答可点击继续。输入框 ＋ 可调整范围，点标签预览；旧的单页截图不重发。\n\n"
                 "聊天记录：SQLite 自动保存到本机，系统账户保护的本机加密；重新打开同一 PDF 可继续。侧栏时钟查看历史，… 新建、导出或删除；所有本机记录包含已关闭及未保存 PDF 的对话。密钥不写入聊天数据库。联网服务的数据政策由服务提供方决定。\n\n"

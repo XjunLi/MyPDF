@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys
 root = Path(SPECPATH).parent
-version = "0.7.0"
+version = "0.8.0"
 mac = sys.platform == "darwin"
 datas = [(str(root / "assets"), "assets"), (str(root / "samples"), "samples"),
          (str(root / "work/dependency-licenses"), "dependency-licenses")]

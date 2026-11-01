@@ -19,3 +19,4 @@ PySide6_Essentials==6.8.3
 pytest==8.4.2
 setuptools==84.2.1
 shiboken6==6.8.3
+fonttools==4.68.0

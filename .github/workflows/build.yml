@@ -65,6 +65,9 @@ jobs:
             work/smoke-packaged/*.png
             work/smoke-native/*.json
             work/smoke-native/*.png
+            work/performance-source/result.json
+            work/performance-packaged/result.json
+            work/performance-native/result.json
           if-no-files-found: ignore
           retention-days: 14
 

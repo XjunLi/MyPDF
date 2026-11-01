@@ -116,27 +116,20 @@ def test_automatic_ocr_has_no_toolbar_button_and_can_cancel_pending_start(qapp, 
     window.close()
 
 
-def test_edit_dialog_uses_original_style_by_default(qapp, pdf_path, tmp_path, monkeypatch):
-    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
-    window.document.doc[0].insert_text((40, 210), "Colored title", fontname="hebo", fontsize=18.5, color=(.8,.1,.2))
+def test_edit_text_uses_original_style_on_page_by_default(qapp,pdf_path,tmp_path,monkeypatch):
+    window=reader(qapp,pdf_path,tmp_path,monkeypatch)
+    window.document.doc[0].insert_text((40,210),"Colored title",fontname="hebo",fontsize=18.5,color=(.8,.1,.2))
     window.after_change()
-    def accept_edit(dialog):
-        assert dialog.preserve.isChecked()
-        assert dialog.size.value() == 18.5
-        assert dialog.color.name() == "#cc1a33"
-        assert not dialog.custom_style.isVisible()
-        dialog.text.setPlainText("Colored note")
-        return QDialog.DialogCode.Accepted
-    monkeypatch.setattr(TextDialog, "exec", accept_edit)
-    errors = []
-    monkeypatch.setattr(window, "error", lambda exc: errors.append(str(exc)))
-    box = window.document.doc[0].search_for("Colored title")[0]
-    window.edit_at(0, tuple((box.tl + box.br) / 2))
-    assert not errors
-    span = next(s for b in window.document.doc[0].get_text("dict")["blocks"] for l in b.get("lines",[]) for s in l["spans"] if "Colored note" in s["text"])
-    assert span["size"] == 18.5 and span["color"] == 0xcc1a33 and span["font"] == "Helvetica-Bold"
-    window.undo()
-    window.close()
+    box=window.document.doc[0].search_for("Colored title")[0]
+    window.edit_at(0,tuple((box.tl+box.br)/2))
+    editor=window.view.inline_editor
+    assert editor is not None and editor.region
+    assert editor.size.value()==18.5 and editor.color.name()=="#cc1a33"
+    editor.input.selectAll(); QTest.keyClicks(editor.input,"Colored note")
+    assert window.view.finish_inline_text()
+    span=next(s for b in window.document.doc[0].get_text("dict")["blocks"] for l in b.get("lines",[]) for s in l["spans"] if "Colored note" in s["text"])
+    assert span["size"]==18.5 and span["color"]==0xcc1a33 and "Bold" in span["font"]
+    window.undo(); window.close()
 
 
 def test_edits_resume_interrupted_ocr_but_respect_explicit_cancel(qapp, pdf_path, tmp_path, monkeypatch):

@@ -7,6 +7,8 @@ from PySide6.QtWidgets import QToolButton
 
 
 PATHS = {
+    "check": '<path d="m5 12 4 4L19 6"/>',
+    "move": '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4m10-8 4 4-4 4"/>',
     "history": '<path d="M3 10a9 9 0 1 1 2 8M3 4v6h6M12 7v5l3 2"/>',
     "more": '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     "menu": '<path d="M4 6h16M4 12h16M4 18h16"/>',

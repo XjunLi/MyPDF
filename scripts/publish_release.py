@@ -13,6 +13,7 @@ for platform in ("Windows-x64","macOS-arm64"):
     report = json.loads((release/f"PDFReader-validation-{platform}.json").read_text())
     assert report["version"] == tag.removeprefix("v") and report["commit"] == commit
     assert report["source"]["ok"] and report["packaged"]["ok"]
+    assert all(result["ok"] for result in report["performance"].values())
     assert (release/f"PDFReader-{platform}.zip").stat().st_size > 1_000_000
 assert (release/"PDFReader-source.zip").exists()
 checksums = []

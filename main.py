@@ -3,6 +3,9 @@ from pathlib import Path
 
 
 def main():
+    if len(sys.argv)>2 and sys.argv[1]=="--performance-test":
+        from pdfreader.diagnostics_performance import performance
+        return performance(sys.argv[2],sys.argv[3] if len(sys.argv)>3 else None)
     if len(sys.argv) > 3 and sys.argv[1] == "--inspect-pdf":
         from pdfreader.diagnostics_pdf import inspect_pdf
         return inspect_pdf(sys.argv[2], sys.argv[3])

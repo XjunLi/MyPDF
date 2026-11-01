@@ -35,6 +35,11 @@ report = {"version":__version__,"commit":commit,"system":platform.system(),"syst
 if mac:
     report["native_cocoa"] = json.loads((root/"work/smoke-native/result.json").read_text(encoding="utf-8"))
     assert report["native_cocoa"]["ok"]
+report["performance"]={}
+for kind in (("source","packaged","native") if mac else ("source","packaged")):
+    result=json.loads((root/f"work/performance-{kind}/result.json").read_text(encoding="utf-8"))
+    assert result["ok"]
+    report["performance"][kind]=result
 validation = output/f"PDFReader-validation-{label}.json"
 validation.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 destination = output/f"PDFReader-{label}.zip"

@@ -742,6 +742,7 @@ class AIPanel(QWidget):
         self.jobs.append(job)
         self.messages.append(self.pending_user)
         receiver = _AIReceiver(self, self.generation)
+        if hasattr(job,"ended"): job.ended.connect(self.drop_finished_job)
         job.receiver = receiver  # Keep the GUI receiver alive until the worker exits.
         job.chunk.connect(receiver.chunk)
         job.finished.connect(receiver.finished)
@@ -814,6 +815,12 @@ class AIPanel(QWidget):
         else:
             self.entries[-1] = ("info", value)
         self.finish()
+
+    @Slot()
+    def drop_finished_job(self):
+        job=self.sender()
+        self.jobs=[running for running in self.jobs if running is not job]
+        if job: job.deleteLater()
 
     def finish(self):
         self.render_timer.stop()

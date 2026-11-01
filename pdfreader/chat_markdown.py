@@ -1,7 +1,9 @@
 """Native, offline Markdown rendering. No WebEngine, scripts or remote images."""
 import html
 import re
-from functools import lru_cache
+from collections import OrderedDict
+import sys
+import platform
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFont, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
@@ -13,10 +15,26 @@ class PrivateDocument(QTextDocument):
         return QByteArray()
 
 
-@lru_cache(maxsize=64)
+MARKDOWN_CACHE_BYTES=8*1024*1024
+_markdown_cache=OrderedDict()
+
+
 def markdown_html(text):
+    if text in _markdown_cache:
+        _markdown_cache.move_to_end(text)
+        return _markdown_cache[text][0]
+    result=_render_markdown(text)
+    cost=sys.getsizeof(text)+sys.getsizeof(result)
+    if cost<=MARKDOWN_CACHE_BYTES:
+        _markdown_cache[text]=(result,cost)
+        while len(_markdown_cache)>32 or sum(item[1] for item in _markdown_cache.values())>MARKDOWN_CACHE_BYTES:
+            _markdown_cache.popitem(last=False)
+    return result
+
+
+def _render_markdown(text):
     document = PrivateDocument()
-    document.setDefaultFont(QFont("Microsoft YaHei UI", 10))
+    document.setDefaultFont(QFont("PingFang SC" if platform.system()=="Darwin" else "Microsoft YaHei UI",10))
     document.setMarkdown(text, QTextDocument.MarkdownFeature.MarkdownDialectGitHub |
                          QTextDocument.MarkdownFeature.MarkdownNoHTML)
     body = re.search(r"<body[^>]*>(.*)</body>", document.toHtml(), re.S)

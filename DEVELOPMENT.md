@@ -34,6 +34,7 @@ bash build-macos.sh
 ```bash
 python -m pytest tests -q --basetemp=work/pytest -o cache_dir=work/pytest-cache
 python main.py --smoke-test work/smoke-source
+python main.py --performance-test work/performance-source
 python main.py --inspect-pdf /path/to/sample.pdf work/inspect-source
 ```
 
@@ -46,3 +47,11 @@ python main.py --inspect-pdf /path/to/sample.pdf work/inspect-source
 发布前同步 Python 版本号、Windows version_info、macOS spec、CHANGELOG 和验证说明。先推送 main 并检查 Actions，再创建注释标签。不要重写已发布的标签或 force-push。
 
 Mac 包目前只有 ad-hoc 签名，没有 Developer ID 和 Apple 公证，README 必须说明首次启动流程；不得声称已公证。物理打印机、所有 PDF 变体与所有系统版本仍需要实际环境验证。
+
+## 字体与资源回归
+
+字体清单位于 `assets/fonts/catalog.json`，随包文件必须通过大小和 SHA-256 校验并附带对应 OFL。下载只能使用清单中固定提交的 HTTPS 官方地址；默认不开启，自动获取需用户勾选。禁止从 PDF 中的网址获取字体或将 PDF 内容、路径、文字、API Key 放入字体请求。商业字体缺失时提示导入或明确替代。
+
+fontTools 对 CID-keyed CFF 字体子集必须保留 glyph IDs；仅检查文字提取不能证明显示正确。`tests/test_font_pixels.py` 将保存重开的子集字形与完整字体逐像素比较。
+
+`--performance-test` 使用隔离设置、关闭 OCR 与网络请求，测量预热后的 48 次编辑器 / 10 次签名窗口生命周期及 200 次混合缩放滚动。断言关闭后无编辑器或 Qt 字体注册残留，位图 <=64 MiB、字体输入缓存 <=64 MiB、子集 <=8 MiB，并记录 RSS 与 median / p95 / max。内存阈值用于发现持续保留，不代表所有 PDF 都具有相同延迟；第三方原生库和文档本身也占用内存。发布构建必须运行源码、打包版；macOS 另外运行原生 Cocoa / Retina 检查。

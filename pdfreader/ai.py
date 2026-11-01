@@ -1,4 +1,4 @@
-"""The only HTTP client in the application. Invoked only by the Send action."""
+"""AI chat transport. Invoked only by the Send action; font acquisition is isolated."""
 import json
 import threading
 import socket
@@ -92,6 +92,7 @@ there too. Never discard an incomplete/malformed event as a successful answer.
 
 
 class AIJob(QObject):
+    ended = Signal()
     chunk = Signal(str)
     finished = Signal(str)
     failed = Signal(str)
@@ -277,3 +278,8 @@ class AIJob(QObject):
             if watchdog:
                 watchdog.cancel()
             self._response = None
+            self.messages.clear()
+            self.config.clear()
+            self._buffer=""
+            try: self.ended.emit()
+            except RuntimeError: pass

@@ -42,8 +42,10 @@ class DocumentTabs:
         def active(callback):
             return lambda *args: callback(*args) if self.view is view else None
         view.regionChosen.connect(active(self.region_chosen))
+        view.textInsertRequested.connect(active(self.insert_inline_text))
+        view.inlineStarted.connect(active(self.cancel_ocr))
         view.markupChosen.connect(active(self.apply_markup))
-        view.inkChosen.connect(active(lambda page, strokes: self.mutate(lambda: self.document.add_ink(page, strokes))))
+        view.inkChosen.connect(active(lambda page, strokes: self.mutate(lambda: self.document.add_ink(page,strokes,color=(self.ink_color.redF(),self.ink_color.greenF(),self.ink_color.blueF()),width=self.ink_width))))
         view.editRequested.connect(active(self.edit_at))
         view.pageChanged.connect(active(self.page_changed))
         view.zoomChanged.connect(active(self.zoom_changed))
@@ -99,6 +101,12 @@ class DocumentTabs:
     def activate_session(self, session):
         if session is self.active_session:
             return
+        if not self.view.finish_inline_text():
+            self.document_tabs.blockSignals(True)
+            for index in range(self.document_tabs.count()):
+                if self.session_at(index) is self.active_session: self.document_tabs.setCurrentIndex(index)
+            self.document_tabs.blockSignals(False)
+            return
         self.capture_session()
         self.cancel_ocr()
         self.document_epoch += 1
@@ -108,6 +116,8 @@ class DocumentTabs:
         self.active_session = session
         self.document = session.document if session else self.empty_document
         self.view = session.view if session else self.empty_view
+        if hasattr(self,"ink_color"):
+            self.view.ink_color=self.ink_color; self.view.ink_width=self.ink_width
         self.selection_text = self.view.selected_text
         self.search_results = list(session.search_results) if session else []
         self.search_index = session.search_index if session else -1
@@ -239,6 +249,7 @@ class DocumentTabs:
 
     def confirm_unsaved(self, session=None):
         session = session or self.active_session
+        if session and not session.view.finish_inline_text(): return False
         if not session or not session.document.dirty:
             return True
         answer = QMessageBox.question(self, "保存更改", f"“{session.name}”有未保存的更改。要保存后关闭吗？",
@@ -280,6 +291,8 @@ class DocumentTabs:
         self.stack.removeWidget(session.view)
         session.view.resize_timer.stop()
         session.view.scroll_timer.stop()
+        session.view.renderer.clear(); session.view.text_cache.clear()
+        session.ai_state.clear()
         session.view.deleteLater()
         session.document.close()
         self.refresh_tabs()
@@ -290,6 +303,7 @@ class DocumentTabs:
         return self.save_session(self.active_session, save_as) if self.active_session else False
 
     def save_session(self, session, save_as=False):
+        if not session.view.finish_inline_text(): return False
         document = session.document
         path = document.path
         if save_as or path is None:

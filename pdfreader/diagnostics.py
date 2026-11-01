@@ -204,6 +204,8 @@ def smoke(directory):
                 assert window.close_document()
                 assert window.stack.currentWidget() is window.welcome and not window.sessions
                 output["checks"].append("centered_toolbar_and_close_tabs_to_welcome")
+                from .diagnostics_editing import exercise_editing
+                exercise_editing(window,root,output)
                 output["checks"].append("close_and_cleanup")
                 finish()
         except Exception:

@@ -132,6 +132,13 @@ class WritableFont:
 
 def resolve_font(page, name, text):
     key = normalized_font(name)
+    if name.startswith("library:"):
+        from .fonts import library_face
+        font=library_face(name[8:])
+        if not all(c.isspace() or font.has_glyph(ord(c),fallback=False) for c in set(text)):
+            raise TextEditError("所选字体缺少部分字形，请选择包含这些字符的字体。")
+        data=font.buffer
+        return WritableFont(font,"PREdit"+hashlib.sha1(data).hexdigest()[:12],data)
     supports = lambda font: all(c.isspace() or font.has_glyph(ord(c), fallback=False) for c in set(text))
     for code, fullname in fitz.Base14_fontdict.items():
         if key == normalized_font(fullname):
@@ -163,33 +170,45 @@ def resolve_font(page, name, text):
             if normalized_font(font.name) == key and supports(font):
                 data = font.buffer
                 return WritableFont(font, "PREdit" + hashlib.sha1(data).hexdigest()[:12], data)
-    raise TextEditError(f"原字体「{name}」不可用，或没有新增文字所需的字形。原文未改动。可取消“保留原文样式”，明确选择替代字体后再保存。")
+    from .fonts import exact_local_face
+    font=exact_local_face(name,text)
+    if font is not None:
+        data=font.buffer
+        return WritableFont(font,"PREdit"+hashlib.sha1(data).hexdigest()[:12],data)
+    raise TextEditError(f"原字体「{name}」不可用，或没有新增文字所需的字形。请获取原字体、导入本机字体，或明确选择替代字体。")
 
 
-def mapped_glyphs(region, replacement):
-    original = []
+def mapped_glyphs(region,replacement):
+    original=[]
     for line in region.lines:
-        if original:
-            original.append(None)
+        if original: original.append(None)
         original.extend(line.glyphs)
-    result = [None] * len(replacement)
-    for tag, i, j, a, b in SequenceMatcher(None, region.text, replacement, autojunk=False).get_opcodes():
-        if tag == "equal":
-            result[a:b] = original[i:j]
-        elif tag in ("replace", "insert"):
-            candidates = [g for g in original[i:j] if g is not None]
+    before=region.text
+    prefix=0; limit=min(len(before),len(replacement))
+    while prefix<limit and before[prefix]==replacement[prefix]: prefix+=1
+    suffix=0
+    while suffix<limit-prefix and before[-suffix-1]==replacement[-suffix-1]: suffix+=1
+    result=[None]*len(replacement)
+    result[:prefix]=original[:prefix]
+    if suffix: result[-suffix:]=original[-suffix:]
+    old_end=len(before)-suffix; new_end=len(replacement)-suffix
+    left=before[prefix:old_end]; right=replacement[prefix:new_end]
+    matcher=SequenceMatcher(None,left,right,autojunk=max(len(left),len(right))>2000)
+    for tag,i,j,a,b in matcher.get_opcodes():
+        i+=prefix; j+=prefix; a+=prefix; b+=prefix
+        if tag=="equal": result[a:b]=original[i:j]
+        elif tag in ("replace","insert"):
+            candidates=[g for g in original[i:j] if g is not None]
             if not candidates:
-                candidates = [next((g for g in reversed(original[:i]) if g), None)
-                              or next((g for g in original[j:] if g), region.glyphs[0])]
-            for k in range(a, b):
-                result[k] = candidates[min(k - a, len(candidates) - 1)]
+                candidates=[next((g for g in reversed(original[:i]) if g),None) or next((g for g in original[j:] if g),region.glyphs[0])]
+            for index in range(a,b): result[index]=candidates[min(index-a,len(candidates)-1)]
     return result
 
 
-def replacement_plan(page, region, text):
+def replacement_plan(page, region, text, mapped_override=None):
     if not region.glyphs or region.invisible:
         raise TextEditError("选区没有可编辑的可见文字。扫描页请使用扫描件覆写，并选择替代字体。")
-    mapped = mapped_glyphs(region, text)
+    mapped = mapped_override if mapped_override is not None else mapped_glyphs(region,text)
     by_font = {}
     for char, glyph in zip(text, mapped):
         if char != "\n" and glyph:
@@ -244,10 +263,110 @@ def write_replacement(page, region, plan, fonts):
         if not r.is_empty:
             page.add_redact_annot(r + (r.width * .35, r.height * .35, -r.width * .35, -r.height * .35), fill=False)
     page.apply_redactions(images=0, graphics=0, text=0)
-    for font in fonts.values():
-        font.install(page)
-    shape = page.new_shape()
-    for point, char, style, fontname, rotation in plan:
-        shape.insert_text(point, char, fontsize=style.size, fontname=fontname, color=style.rgb,
-                          rotate=rotation, fill_opacity=style.alpha / 255)
-    shape.commit()
+    if not plan: return
+    bounds=page.rect*page.derotation_matrix
+    with fitz.open() as overlay:
+        target=overlay.new_page(width=bounds.width,height=bounds.height)
+        from .fonts import subset_font
+        for font in fonts.values():
+            if font.buffer:
+                used="".join(char for _,char,_,name,_ in plan if name==font.name)
+                if used: target.insert_font(fontname=font.name,fontbuffer=subset_font(font.font,used))
+            else: font.install(target)
+        shape=target.new_shape()
+        for point,char,style,fontname,rotation in plan:
+            shape.insert_text(point,char,fontsize=style.size,fontname=fontname,color=style.rgb,
+                              rotate=rotation,fill_opacity=style.alpha/255)
+        shape.commit()
+        page.show_pdf_page(bounds,overlay,0)
+
+
+def editing_bounds(page,region):
+    box=fitz.Rect(region.rect)
+    bounds=page.rect*page.derotation_matrix
+    bottom=bounds.y1-6
+    originals={tuple(line.origin) for line in region.lines}
+    obstacles=[]
+    for block in page.get_text("dict",flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]:
+        for line in block.get("lines",[]):
+            if not line["spans"]: continue
+            if tuple(line["spans"][0]["origin"]) not in originals: obstacles.append(fitz.Rect(line["bbox"]))
+    obstacles += [fitz.Rect(b[:4]) for b in page.get_text("blocks") if b[6]!=0]
+    for other in obstacles:
+        if other.x0<box.x1 and other.x1>box.x0 and other.y0>=box.y1-.1: bottom=min(bottom,other.y0-2)
+    for drawing in page.get_drawings():
+        panel=fitz.Rect(drawing["rect"])
+        if panel.contains(box) and panel.y1>box.y1+4: bottom=min(bottom,panel.y1-4)
+    box.y1=max(box.y1,bottom)
+    return box
+
+
+def reflow_replacement(page,region,text,size=None,color=None,styles=None,bounds_override=None):
+    from dataclasses import replace
+    original=region
+    if size is not None or color is not None:
+        glyphs=[]; lines=[]
+        for line in region.lines:
+            changed=[]
+            for glyph in line.glyphs:
+                newsize=size if size is not None else glyph.style.size
+                style=replace(glyph.style,size=newsize,color=color if color is not None else glyph.style.color)
+                changed.append(replace(glyph,style=style,advance=glyph.advance*newsize/glyph.style.size))
+            glyphs.extend(changed); lines.append(replace(line,glyphs=changed))
+        region=replace(region,glyphs=glyphs,lines=lines)
+    bounds=fitz.Rect(bounds_override) if bounds_override is not None else editing_bounds(page,original)
+    # Orthogonal vertical text retains the established replacement path.
+    if any(abs(line.direction[1])>.01 for line in region.lines):
+        return replacement_plan(page,region,text)
+    mapped=mapped_glyphs(region,text)
+    if styles is not None:
+        if len(styles)!=len(text): raise TextEditError("文字样式数量与内容不符。")
+        from dataclasses import replace
+        for index,(char,style) in enumerate(zip(text,styles)):
+            if char=="\n" or not mapped[index]: continue
+            old=mapped[index]
+            newstyle=replace(old.style,font=style["font"],size=style["size"],color=style["color"])
+            keep=old.style.font==newstyle.font and abs(old.style.size-newstyle.size)<.01
+            mapped[index]=replace(old,style=newstyle,advance=old.advance if keep else 0)
+    fonts={}
+    for char,glyph in zip(text,mapped):
+        if glyph and char!="\n":
+            fonts[glyph.style.font]=fonts.get(glyph.style.font,"")+char
+    resolved={name:resolve_font(page,name,chars) for name,chars in fonts.items()}
+    lines=[]; current=[]; advances=[]; mapped_lines=[]; current_maps=[]
+    for char,glyph in zip(text,mapped):
+        if char=="\n":
+            lines.append("".join(current)); mapped_lines.append(current_maps)
+            current=[]; advances=[]; current_maps=[]; continue
+        if glyph is None: continue
+        face=resolved[glyph.style.font].font
+        advance=glyph.advance if glyph.text==char and glyph.advance>0 else face.glyph_advance(ord(char))*glyph.style.size
+        if advance>bounds.width+.01: raise TextEditError("当前区域放不下此字号。")
+        if current and sum(advances)+advance>bounds.width:
+            split=next((i+1 for i in range(len(current)-1,-1,-1) if current[i].isspace()),0)
+            if split:
+                lines.append("".join(current[:split])); mapped_lines.append(current_maps[:split])
+                current=current[split:]; advances=advances[split:]; current_maps=current_maps[split:]
+            if current and sum(advances)+advance>bounds.width:
+                lines.append("".join(current)); mapped_lines.append(current_maps)
+                current=[]; advances=[]; current_maps=[]
+        current.append(char); advances.append(advance); current_maps.append(glyph)
+    lines.append("".join(current)); mapped_lines.append(current_maps)
+    from dataclasses import replace
+    templates=list(region.lines)
+    step=max(g.style.size for g in mapped if g)*1.4 if any(mapped) else 16
+    if len(templates)>1:
+        step=templates[-1].origin[1]-templates[-2].origin[1]
+    while len(templates)<len(lines):
+        last=templates[-1]
+        templates.append(replace(last,origin=(last.origin[0],last.origin[1]+step)))
+    # A changed size may need more ascent while keeping the existing baseline.
+    if any(mapped):
+        top=min(region.lines[g.line].origin[1]-g.style.ascender*g.style.size for g in mapped if g)
+        bounds.y0=max(0,min(bounds.y0,top))
+    expanded=replace(region,rect=tuple(bounds),lines=templates)
+    wrapped=[]
+    for number,line in enumerate(mapped_lines):
+        if number: wrapped.append(None)
+        wrapped.extend(line)
+    return replacement_plan(page,expanded,"\n".join(lines),mapped_override=wrapped)

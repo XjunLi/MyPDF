@@ -1,14 +1,25 @@
-from PySide6.QtCore import Qt, QPointF
+from PySide6.QtCore import Qt, QPointF, QTimer, Slot
 import re
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QImageReader
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget,
     QDialogButtonBox, QPlainTextEdit, QSpinBox, QPushButton, QFormLayout,
-    QLineEdit, QComboBox, QCheckBox, QDoubleSpinBox, QColorDialog)
+    QLineEdit, QComboBox, QCheckBox, QDoubleSpinBox, QColorDialog, QTabWidget, QFileDialog)
 
 
-class TextDialog(QDialog):
-    def __init__(self, parent, text="", editing=False, region=None):
+class DisposableDialog(QDialog):
+    def done(self,result):
+        super().done(result)
+        self.deleteLater()
+
+
+class TextDialog(DisposableDialog):
+    def __init__(self, parent, text="", editing=False, region=None, pdf_page=None):
         super().__init__(parent)
+        self.settings=getattr(parent,"settings",None)
+        self.region=region
+        self.pdf_page=pdf_page
+        self.font_job=None
+        self.font_attempts=set()
         self.setWindowTitle("修改 PDF 文字" if editing else "添加文字")
         self.resize(510, 420)
         layout = QVBoxLayout(self)
@@ -38,6 +49,8 @@ class TextDialog(QDialog):
         for label, code in [("自动（中英文）", None), ("Helvetica", "helv"), ("Helvetica Bold", "hebo"),
                             ("Times Roman", "tiro"), ("Times Italic", "tiit"), ("Courier", "cour")]:
             self.font.addItem(label, code)
+        from .fonts import font_choices
+        for label,identity in font_choices(): self.font.addItem(label,identity)
         form.addRow("替代字体" if editing else "字体", self.font)
         self.size = QDoubleSpinBox()
         self.size.setRange(1, 500)
@@ -54,6 +67,19 @@ class TextDialog(QDialog):
         self.custom_style.setVisible(not native)
         self.preserve.toggled.connect(lambda checked: self.custom_style.setVisible(not checked))
         layout.addWidget(self.custom_style)
+        font_row=QHBoxLayout()
+        self.font_status=QLabel()
+        self.font_status.setWordWrap(True)
+        font_row.addWidget(self.font_status,1)
+        self.library_button=QPushButton("字体库…")
+        self.library_button.clicked.connect(self.open_font_library)
+        font_row.addWidget(self.library_button)
+        layout.addLayout(font_row)
+        self.font_timer=QTimer(self)
+        self.font_timer.setSingleShot(True); self.font_timer.setInterval(180)
+        self.font_timer.timeout.connect(self.check_original_fonts)
+        self.text.textChanged.connect(lambda:self.font_timer.start())
+        if native: self.font_timer.start()
         self.raster_replace = QCheckBox("扫描件覆写：清除选框内图像，以白底重新写入")
         self.raster_replace.setVisible(editing and not native)
         self.preserve.toggled.connect(lambda checked: self.raster_replace.setVisible(editing and not checked))
@@ -66,6 +92,60 @@ class TextDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def open_font_library(self):
+        from .font_library import FontLibraryDialog
+        requested=self.region.primary_style.font if self.region and self.region.primary_style else ""
+        dialog=FontLibraryDialog(self,requested)
+        if dialog.exec():
+            identity=dialog.selected_font()
+            from .fonts import font_choices
+            selected=self.font.currentData()
+            while self.font.count()>6: self.font.removeItem(6)
+            for label,value in font_choices(): self.font.addItem(label,value)
+            self.font.setCurrentIndex(max(0,self.font.findData(identity)))
+            if self.region:
+                from .fonts import catalog_match
+                exact=catalog_match(requested)
+                self.preserve.setChecked(bool(exact and identity=="library:"+exact))
+            self.check_original_fonts()
+
+    def check_original_fonts(self):
+        if not self.region or not self.preserve.isChecked(): return
+        from .text_edit import mapped_glyphs,resolve_font,TextEditError
+        from .fonts import catalog_match
+        text=self.text.toPlainText()
+        by_font={}
+        for char,glyph in zip(text,mapped_glyphs(self.region,text)):
+            if glyph and char!="\n": by_font[glyph.style.font]=by_font.get(glyph.style.font,"")+char
+        missing=[]
+        for name,chars in by_font.items():
+            try: resolve_font(self.pdf_page,name,chars)
+            except (TextEditError,RuntimeError,ValueError): missing.append(name)
+        self.font_status.setText("缺少字形或原字体："+"、".join(missing)+"。可在字体库获取、导入或选择替代。" if missing else "")
+        if missing and self.settings and self.settings.values.get("auto_font_download") and self.font_job is None:
+            identity=next((match for name in missing if (match:=catalog_match(name)) and match not in self.font_attempts),None)
+            if identity:
+                from .font_download import FontDownload
+                self.font_attempts.add(identity)
+                self.font_job=FontDownload(identity,self)
+                self.font_job.completed.connect(self.font_ready); self.font_job.failed.connect(self.font_failed)
+                self.font_status.setText("正在获取缺失的开源字体…")
+                self.font_job.start()
+
+    @Slot(str)
+    def font_ready(self,_):
+        self.font_job=None
+        self.check_original_fonts()
+
+    @Slot(str)
+    def font_failed(self,message):
+        self.font_job=None
+        self.font_status.setText(message)
+
+    def done(self,result):
+        if self.font_job: self.font_job.cancel()
+        super().done(result)
 
     def choose_color(self):
         color = QColorDialog.getColor(self.color, self, "文字颜色")
@@ -81,7 +161,7 @@ class TextDialog(QDialog):
         return (self.color.redF(), self.color.greenF(), self.color.blueF())
 
 
-class CommentDialog(QDialog):
+class CommentDialog(DisposableDialog):
     def __init__(self, parent, text="", quote="", editing=False):
         super().__init__(parent)
         self.setWindowTitle("修改注释" if editing else "文字注释" if quote else "添加便笺")
@@ -113,6 +193,7 @@ class SignaturePad(QWidget):
         self.setMinimumSize(500, 220)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.strokes = []
+        self.color=QColor("#203651")
         self.active = False
 
     def paintEvent(self, event):
@@ -121,7 +202,7 @@ class SignaturePad(QWidget):
         painter.fillRect(self.rect(), QColor("#ffffff"))
         painter.setPen(QPen(QColor("#dfe5ec"), 1, Qt.PenStyle.DashLine))
         painter.drawLine(25, self.height() - 50, self.width() - 25, self.height() - 50)
-        painter.setPen(QPen(QColor("#203651"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(self.color, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         for stroke in self.strokes:
             for a, b in zip(stroke, stroke[1:]):
                 painter.drawLine(QPointF(*a), QPointF(*b))
@@ -150,28 +231,94 @@ class SignaturePad(QWidget):
         return [[((x - x0) / width, (y - y0) / height) for x, y in s] for s in valid]
 
 
-class SignatureDialog(QDialog):
-    def __init__(self, parent):
+class SignatureDialog(DisposableDialog):
+    def __init__(self,parent):
         super().__init__(parent)
-        self.setWindowTitle("手写签名")
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("在下方签名，笔迹会放入你刚绘制的选框。此功能不生成证书数字签名。"))
-        self.pad = SignaturePad()
-        layout.addWidget(self.pad)
-        clear = QPushButton("清空笔迹")
-        clear.clicked.connect(self.clear)
-        layout.addWidget(clear)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.setWindowTitle("添加签名")
+        self.resize(550,390)
+        self.color=QColor("#25364c"); self.image_path=None
+        layout=QVBoxLayout(self)
+        note=QLabel("选择手写、键入姓名或签名图片。这些方式放置可见签名，不生成证书数字签名。")
+        note.setWordWrap(True); layout.addWidget(note)
+        self.tabs=QTabWidget(); layout.addWidget(self.tabs)
+        hand=QWidget(); hand_layout=QVBoxLayout(hand)
+        self.pad=SignaturePad(); hand_layout.addWidget(self.pad)
+        clear=QPushButton("清空笔迹"); clear.clicked.connect(self.clear); hand_layout.addWidget(clear)
+        self.tabs.addTab(hand,"手写")
+        typed=QWidget(); typed_layout=QVBoxLayout(typed)
+        self.name=QLineEdit(); self.name.setPlaceholderText("键入姓名"); self.name.setMaxLength(80)
+        typed_layout.addWidget(self.name)
+        self.signature_font=QComboBox()
+        self.signature_font.addItem("手写风格（英文）","library:handwriting")
+        self.signature_font.addItem("思源黑体（中英文）","library:sans-sc")
+        self.signature_font.addItem("Noto Serif","library:serif")
+        typed_layout.addWidget(self.signature_font)
+        self.preview=QLabel(); self.preview.setTextFormat(Qt.TextFormat.PlainText)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter); self.preview.setMinimumHeight(110)
+        typed_layout.addWidget(self.preview)
+        self.name.textChanged.connect(self.update_preview); self.signature_font.currentIndexChanged.connect(self.update_preview)
+        self.tabs.addTab(typed,"键入")
+        image=QWidget(); image_layout=QVBoxLayout(image)
+        self.image_preview=QLabel("PNG / JPG 签名图片，支持透明背景")
+        self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter); self.image_preview.setMinimumHeight(140)
+        image_layout.addWidget(self.image_preview)
+        choose=QPushButton("选择签名图片…"); choose.clicked.connect(self.choose_image); image_layout.addWidget(choose)
+        self.tabs.addTab(image,"图片")
+        row=QHBoxLayout(); row.addStretch()
+        self.color_button=QPushButton("签名颜色")
+        self.color_button.clicked.connect(self.choose_color); row.addWidget(self.color_button); layout.addLayout(row)
+        self.status=QLabel(); self.status.setWordWrap(True); self.status.setTextFormat(Qt.TextFormat.PlainText); layout.addWidget(self.status)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("放置签名")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+        self.update_preview()
+
+    def update_preview(self,*_):
+        from .fonts import qt_family
+        qt_family("library:sans-sc",self)
+        family=qt_family(self.signature_font.currentData(),self)
+        self.preview.setText(self.name.text() or "Your name")
+        self.preview.setStyleSheet("font-family:'"+family+"';font-size:32px;color:"+self.color.name()+";")
+
+    def choose_color(self):
+        color=QColorDialog.getColor(self.color,self,"签名颜色")
+        if color.isValid():
+            self.color=color; self.pad.color=color; self.pad.update(); self.update_preview()
+
+    def choose_image(self):
+        path,_=QFileDialog.getOpenFileName(self,"选择签名图片","","图片 (*.png *.jpg *.jpeg)")
+        if path:
+            try:
+                from pathlib import Path
+                if Path(path).stat().st_size>64*1024*1024: raise ValueError("请选择小于 64 MiB 的图片。")
+                reader=QImageReader(path); size=reader.size()
+                if size.isEmpty() or size.width()*size.height()>24_000_000: raise ValueError("图片无法读取或像素过大。")
+                pixmap=QPixmap(path)
+                if pixmap.isNull(): raise ValueError("无法读取此签名图片。")
+                self.image_path=path
+                self.image_preview.setPixmap(pixmap.scaled(450,150,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation))
+                self.status.clear()
+            except Exception as exc: self.status.setText(str(exc))
+
+    def accept(self):
+        if self.tabs.currentIndex()==0 and not self.pad.normalized(): self.status.setText("请先书写签名。"); return
+        if self.tabs.currentIndex()==1 and not self.name.text().strip(): self.status.setText("请先键入姓名。"); return
+        if self.tabs.currentIndex()==2 and not self.image_path: self.status.setText("请先选择签名图片。"); return
+        super().accept()
+
+    def done(self,result):
+        from .fonts import release_fonts
+        release_fonts(self)
+        super().done(result)
 
     def clear(self):
-        self.pad.strokes.clear()
-        self.pad.update()
+        self.pad.strokes.clear(); self.pad.update()
+
+    def rgb(self): return self.color.redF(),self.color.greenF(),self.color.blueF()
 
 
-class AISettingsDialog(QDialog):
+class AISettingsDialog(DisposableDialog):
     def __init__(self, parent, config):
         super().__init__(parent)
         self.setWindowTitle("AI 连接设置")

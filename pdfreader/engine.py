@@ -6,6 +6,7 @@ Coordinates exposed here are unrotated PDF points, relative to the page crop.
 from contextlib import contextmanager
 from pathlib import Path
 import os
+import math
 import tempfile
 import uuid
 
@@ -215,6 +216,65 @@ class PdfDocument:
                 return box, text
         return None
 
+    def paragraph_at(self,page,point):
+        p=self.doc[page]
+        found=self.text_block_at(page,point)
+        if not found: return None
+        region=self.text_region(page,found[0])
+        if region.invisible: return region
+        for block in p.get_text("dict",flags=fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES)["blocks"]:
+            lines=block.get("lines",[])
+            index=next((i for i,line in enumerate(lines) if fitz.Rect(line["bbox"]).contains(fitz.Point(point))),None)
+            if index is None: continue
+            first=last=index
+            def adjacent(a,b):
+                x,y=fitz.Rect(a["bbox"]),fitz.Rect(b["bbox"])
+                return abs(x.x0-y.x0)<4 and 0<y.y0-x.y0<max(x.height,y.height)*2 and abs(a["spans"][0]["size"]-b["spans"][0]["size"])<1
+            while first>0 and adjacent(lines[first-1],lines[first]): first-=1
+            while last+1<len(lines) and adjacent(lines[last],lines[last+1]): last+=1
+            if first!=last:
+                box=fitz.Rect(lines[first]["bbox"])
+                for line in lines[first+1:last+1]: box|=fitz.Rect(line["bbox"])
+                # Keep the original line's right margin, stopping before columns.
+                box.x1=max(box.x1,found[0].x1)
+                region=self.text_region(page,box)
+            return region
+        return region
+
+    def edit_text_box(self,page,region,text,fontname=None,size=None,color=None,styles=None,offset=(0,0)):
+        from .text_edit import reflow_replacement,editing_bounds
+        if text==region.text and fontname is None and size is None and color is None and styles is None: return
+        p=self.doc[page]
+        try:
+            if fontname is None or styles is not None:
+                plan,fonts=reflow_replacement(p,region,text,size,color,styles)
+                if offset!=(0,0):
+                    delta=fitz.Point(offset)
+                    moved=[]; bounds=p.rect*p.derotation_matrix
+                    for point,char,style,name,rotation in plan:
+                        point=point+delta
+                        angle=math.radians(rotation)
+                        direction=fitz.Point(math.cos(angle),-math.sin(angle))
+                        advance=fonts[style.font].font.glyph_advance(ord(char))*style.size
+                        corners=[point+fitz.Point(direction.x*x-direction.y*y,direction.y*x+direction.x*y)
+                                 for x in (0,advance) for y in (-style.ascender*style.size,-style.descender*style.size)]
+                        box=fitz.Rect(min(x.x for x in corners),min(x.y for x in corners),max(x.x for x in corners),max(x.y for x in corners))
+                        if not char.isspace() and not bounds.contains(box): raise TextEditError("移动后的文字超出页面，请将文字框移回页内。")
+                        moved.append((point,char,style,name,rotation))
+                    plan=moved
+                with self.change("编辑文字"): write_replacement(p,region,plan,fonts)
+            else:
+                from .text_layout import layout_text,write_layout
+                bounds=editing_bounds(p,region)
+                chosen_size=size or region.primary_style.size
+                chosen_color=tuple(((color if color is not None else region.primary_style.color)>>shift & 255)/255 for shift in (16,8,0))
+                layout=layout_text(text,chosen_size,fontname,bounds.width,min_width=bounds.width)
+                if layout.height>bounds.height+.01: raise TextEditError("文字超出可用区域，请减少内容或调整字号。")
+                with self.change("编辑文字"):
+                    write_replacement(p,region,[],{})
+                    if text.strip(): write_layout(p,bounds.tl,layout,chosen_size,chosen_color)
+        except (TextEditError,ValueError) as exc: raise PdfError(str(exc)) from exc
+
     def text_region(self, page, rect):
         return capture_region(self.doc[page], rect)
 
@@ -295,6 +355,18 @@ class PdfDocument:
         with self.change("编辑文字" if replace else "添加文字"):
             p = self.doc[page]
             box = fitz.Rect(rect)
+            if fontname and fontname.startswith("library:"):
+                from .text_layout import layout_text, write_layout
+                layout=layout_text(text,size,fontname,box.width,min_width=box.width)
+                if layout.height>box.height+.01:
+                    raise PdfError("文字超出选框。请调整字号、文字或选框。")
+                if replace:
+                    if any(a.type[0]==fitz.PDF_ANNOT_REDACT for a in (p.annots() or [])):
+                        raise PdfError("本页含有尚未应用的遮盖标记，请先处理。")
+                    p.add_redact_annot(box,fill=(1,1,1) if raster_replace else False)
+                    p.apply_redactions(images=2 if raster_replace else 0,graphics=0,text=0)
+                write_layout(p,box.tl,layout,size,color)
+                return
             font = fontname or self._font(text)
             face = fitz.Font(font)
             if any(not c.isspace() and not face.has_glyph(ord(c), fallback=False) for c in text):
@@ -313,15 +385,41 @@ class PdfDocument:
                 p.apply_redactions(images=2 if raster_replace else 0, graphics=0, text=0)
             p.insert_textbox(box, text, fontsize=size, fontname=font, color=color)
 
-    def add_ink(self, page, strokes, signature=False):
+    def insert_text_box(self,page,point,text,size=12,fontname="library:sans-sc",color=(.08,.12,.18)):
+        if not text.strip(): return
+        from .text_layout import layout_text, write_layout
+        p=self.doc[page]
+        x,y=point
+        if x<0 or y<0 or x>=p.rect.width or y>=p.rect.height:
+            raise PdfError("文字框必须放在页面内。")
+        layout=layout_text(text,size,fontname,p.rect.width-x)
+        if y+layout.height>p.rect.height+.01:
+            raise PdfError("文字已到达页面底部。请移动文字框、减少内容或调整字号；草稿已保留。")
+        with self.change("添加文字"):
+            write_layout(p,(x,y),layout,size,color,display_coordinates=True)
+        return (x,y,x+layout.width,y+layout.height)
+
+    def add_typed_signature(self,page,rect,text,fontname="library:handwriting",color=(.08,.16,.3)):
+        from .text_layout import layout_text,write_layout,PADDING
+        p=self.doc[page]; box=fitz.Rect(rect)*p.rotation_matrix
+        size=min(32.,max(1.,(box.height-PADDING*2)/1.8))
+        layout=layout_text(text,size,fontname,box.width,min_width=0)
+        for _ in range(6):
+            if layout.height<=box.height+.01 and len(layout.lines)==1: break
+            size*=.75; layout=layout_text(text,size,fontname,box.width,min_width=0)
+        if layout.height>box.height+.01: raise PdfError("签名区域过小，请选择更大的区域。")
+        with self.change("键入签名"):
+            write_layout(p,box.tl,layout,size,color,display_coordinates=True)
+
+    def add_ink(self, page, strokes, signature=False, color=(.08,.16,.3), width=None):
         valid = [[tuple(fitz.Point(p)) for p in stroke] for stroke in strokes if len(stroke) > 1]
         if not valid:
             raise PdfError("请先绘制笔迹。")
         with self.change("手写签名" if signature else "画笔", annotation=True):
             p = self.doc[page]
             a = p.add_ink_annot(valid)
-            a.set_colors(stroke=(.08, .16, .3))
-            a.set_border(width=1.5 if signature else 1.1)
+            a.set_colors(stroke=color)
+            a.set_border(width=width if width is not None else 1.5 if signature else 1.1)
             a.set_info(title="我", subject="手写签名" if signature else "自由笔迹")
             a.update()
 
@@ -396,6 +494,8 @@ class PdfDocument:
         if self.doc is not None:
             self.doc.close()
             self.doc = None
+        self.undo_stack.clear(); self.redo_stack.clear()
+        self.password=""
 
 
 def parse_page_range(value, total):

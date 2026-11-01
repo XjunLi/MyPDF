@@ -30,7 +30,9 @@ class PageItem(QGraphicsItem):
         painter.fillRect(self.size, Qt.GlobalColor.white)
         try:
             area = option.exposedRect.intersected(self.size)
-            self.viewer.renderer.paint(painter, self.number, (area.left(), area.top(), area.right(), area.bottom()))
+            editor=self.viewer.inline_editor
+            renderer=editor.background_renderer if editor and editor.number==self.number and editor.background_renderer else self.viewer.renderer
+            renderer.paint(painter,0 if renderer is not self.viewer.renderer else self.number,(area.left(),area.top(),area.right(),area.bottom()))
         except Exception as exc:
             painter.setPen(QColor("#a03e3e"))
             painter.drawText(self.size.adjusted(24, 24, -24, -24), Qt.TextFlag.TextWordWrap, str(exc))
@@ -50,13 +52,15 @@ class PageItem(QGraphicsItem):
             painter.setPen(pen)
             painter.drawRect(qrect(fitz.Rect(selected[1]) * page.rotation_matrix))
         if self.viewer.drag_page == self.number and self.viewer.ink:
-            painter.setPen(QPen(QColor("#24364c"), 1.4))
+            painter.setPen(QPen(self.viewer.ink_color,self.viewer.ink_width))
             points = [fitz.Point(p) * page.rotation_matrix for p in self.viewer.ink]
             for a, b in zip(points, points[1:]):
                 painter.drawLine(QPointF(a.x, a.y), QPointF(b.x, b.y))
 
 
 class PdfView(QGraphicsView):
+    textInsertRequested = Signal(int, object)
+    inlineStarted = Signal()
     regionChosen = Signal(str, int, object)
     markupChosen = Signal(str, object)
     inkChosen = Signal(int, object)
@@ -72,6 +76,7 @@ class PdfView(QGraphicsView):
 
     def __init__(self, document, parent=None):
         super().__init__(parent)
+        self.inline_editor = None
         self.document = document
         self.scene_obj = QGraphicsScene(self)
         self.setScene(self.scene_obj)
@@ -95,6 +100,7 @@ class PdfView(QGraphicsView):
         self.drag_page = self.drag_start = self.drag_pos = None
         self.dragging_text = self.double_clicked = False
         self.ink = []
+        self.ink_color=QColor("#25364c"); self.ink_width=1.1
         self.press_pos = None
         self.point_dragged = False
         self.annotation_hits = []
@@ -106,6 +112,7 @@ class PdfView(QGraphicsView):
         self.scroll_timer = QTimer(self)
         self.scroll_timer.setInterval(25)
         self.scroll_timer.timeout.connect(self._auto_scroll)
+        self.horizontalScrollBar().valueChanged.connect(lambda:self.inline_editor.position() if self.inline_editor else None)
 
     def clear_selection(self):
         self.text_boxes.clear()
@@ -127,6 +134,7 @@ class PdfView(QGraphicsView):
         self.drag_page = self.drag_start = None
         self.ink = []
         self.annotation_hits = self.document.annotations() if self.document.count else []
+        if self.inline_editor: self.inline_editor.detach()
         self.scene_obj.clear()
         self.items_by_page.clear()
         if not self.document.count:
@@ -150,6 +158,7 @@ class PdfView(QGraphicsView):
             self.verticalScrollBar().setValue(0)
         self.rebuilding = False
         self.pageChanged.emit(number)
+        if self.inline_editor: self.inline_editor.position()
 
     def text_page(self, number):
         key = self.document.revision, number
@@ -159,6 +168,45 @@ class PdfView(QGraphicsView):
                 self.text_cache.popitem(last=False)
         self.text_cache.move_to_end(key)
         return self.text_cache[key]
+
+    def begin_inline_text(self,number,point):
+        if not self.finish_inline_text(): return
+        try: self.document.require_permission()
+        except Exception as exc: self.message.emit(str(exc)); return
+        from .inline_text import InlineTextEditor
+        page=self.document.doc[number]
+        point=fitz.Point(point)*page.rotation_matrix
+        point.x=max(0,min(point.x,page.rect.width-min(144,page.rect.width)))
+        point.y=max(0,min(point.y,page.rect.height-30))
+        self.inlineStarted.emit()
+        self.inline_editor=InlineTextEditor(self,number,tuple(point))
+
+    def begin_inline_edit(self,number,region):
+        if len(region.text)>25000:
+            self.message.emit("这段文字过长，请拖框选择较小的范围编辑。"); return
+        if not self.finish_inline_text(): return
+        try: self.document.require_permission()
+        except Exception as exc: self.message.emit(str(exc)); return
+        from .inline_text import InlineTextEditor
+        self.inlineStarted.emit(); self.clear_selection()
+        self.inline_editor=InlineTextEditor(self,number,(0,0),region=region)
+        self.viewport().update()
+
+    def finish_inline_text(self,cancel=False):
+        editor=self.inline_editor
+        if editor is None: return True
+        if not cancel: QApplication.inputMethod().commit()
+        if cancel or (not editor.region and not editor.input.toPlainText().strip()) or (editor.region and editor.input.toPlainText()==editor.original_text and not editor.size_modified and not editor.color_modified and editor.fontname=="native" and editor.point==editor.original_point):
+            self.dismiss_inline_text(); return True
+        try: payload=editor.payload()
+        except ValueError as exc: editor.show_error(str(exc)); return False
+        self.textInsertRequested.emit(editor.number,payload)
+        return self.inline_editor is None
+
+    def dismiss_inline_text(self):
+        editor,self.inline_editor=self.inline_editor,None
+        if editor: editor.dispose()
+        self.viewport().update()
 
     def set_mode(self, mode):
         if mode in ("highlight", "underline", "strike"):
@@ -182,6 +230,7 @@ class PdfView(QGraphicsView):
         self.centerOn(before + QPointF((center.x() - anchor.x()) / display_zoom, (center.y() - anchor.y()) / display_zoom))
         self.zoomChanged.emit(self.zoom)
         self.viewport().update()
+        if self.inline_editor: self.inline_editor.position()
 
     def fit_width(self):
         if self.document.count:
@@ -195,6 +244,7 @@ class PdfView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if self.inline_editor: self.inline_editor.position()
         if self.fit_mode:
             self.resize_timer.start(70)
 
@@ -208,6 +258,7 @@ class PdfView(QGraphicsView):
             super().wheelEvent(event)
 
     def _page_at_center(self):
+        if self.inline_editor: self.inline_editor.position()
         if not self.items_by_page or self.rebuilding:
             return
         y = self.mapToScene(self.viewport().rect().center()).y()
@@ -287,6 +338,12 @@ class PdfView(QGraphicsView):
                 self._extend_text_selection(self.drag_pos)
 
     def mousePressEvent(self, event):
+        if self.inline_editor:
+            proxy=self.inline_editor.proxy
+            if proxy.contains(proxy.mapFromScene(self.mapToScene(event.position().toPoint()))):
+                return super().mousePressEvent(event)
+        if self.inline_editor and not self.finish_inline_text():
+            event.accept(); return
         if event.button() != Qt.MouseButton.LeftButton or self.mode == "hand":
             return super().mousePressEvent(event)
         self.double_clicked = False
@@ -324,6 +381,8 @@ class PdfView(QGraphicsView):
         event.accept()
 
     def mouseMoveEvent(self, event):
+        if self.inline_editor and self.scene_obj.mouseGrabberItem() is self.inline_editor.proxy:
+            return super().mouseMoveEvent(event)
         if self.dragging_text:
             self.drag_pos = event.position().toPoint()
             self._extend_text_selection(self.drag_pos)
@@ -373,6 +432,9 @@ class PdfView(QGraphicsView):
             self.selection = None
             if len(ink) > 1:
                 self.inkChosen.emit(number, [ink])
+        elif self.mode == "text":
+            self.selection = None
+            self.begin_inline_text(number,point)
         elif self.mode == "comment":
             self.selection = None
             moved = (event.position().toPoint() - self.press_pos).manhattanLength() if self.press_pos else 0
@@ -380,6 +442,11 @@ class PdfView(QGraphicsView):
                 self.regionChosen.emit(self.mode, number, tuple(fitz.Rect(point.x, point.y, point.x + 18, point.y + 18)))
             else:
                 self.message.emit("便笺只需单击。文字注释请先划词，再点注释。")
+        elif self.mode=="signature" and (not selection or fitz.Rect(selection[1]).width<6):
+            p=self.document.doc[number]
+            display=point*p.rotation_matrix
+            display.x=max(0,min(display.x,p.rect.width-180)); display.y=max(0,min(display.y,p.rect.height-60))
+            self.regionChosen.emit(self.mode,number,tuple(fitz.Rect(display.x,display.y,display.x+180,display.y+60)*p.derotation_matrix))
         elif self.mode == "edit" and selection and fitz.Rect(selection[1]).width < 6:
             self.editRequested.emit(number, tuple(point))
         elif selection and fitz.Rect(selection[1]).width > 2 and fitz.Rect(selection[1]).height > 2:
@@ -438,6 +505,8 @@ class PdfView(QGraphicsView):
         menu.exec(event.globalPos())
 
     def keyPressEvent(self, event):
+        if self.inline_editor and self.scene_obj.focusItem() is self.inline_editor.proxy:
+            return super().keyPressEvent(event)
         ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
         if ctrl and event.key() == Qt.Key.Key_C:
             self.copy_selection()

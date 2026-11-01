@@ -1,9 +1,16 @@
 {
-  "version": "0.7.0",
+  "version": "0.8.0",
   "date": "2026-11-01",
   "local_windows_tests": {
-    "passed": 174,
+    "passed": 195,
     "skipped": 1
+  },
+  "smoke_check_count": 28,
+  "performance_test": {
+    "editor_cycles": 48,
+    "signature_dialog_cycles": 10,
+    "reading_operations": 200,
+    "raster_cache_bytes": 67108864
   },
   "native_platform_reports": "GitHub Releases: PDFReader-validation-*.json",
   "workflow": "https://github.com/XjunLi/MyPDF/actions/workflows/build.yml",
