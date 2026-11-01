@@ -302,7 +302,13 @@ def test_switch_cancels_old_ocr_and_only_schedules_active_document(reader, pdf_p
     calls = []
     monkeypatch.setattr(reader, "start_ocr", lambda *a, **k: calls.append(reader.active_session))
     reader.activate_session(first)
-    QTest.qWait(490)
+    # The 450 ms debounce is not a real-time deadline; loaded macOS runners
+    # can deliver the timer later. Still require exactly the active document.
+    from PySide6.QtCore import QElapsedTimer
+    timer = QElapsedTimer()
+    timer.start()
+    while not calls and timer.elapsed() < 2000:
+        QTest.qWait(20)
     assert calls == [first]
 
 
