@@ -6,11 +6,18 @@ version = "0.8.2"
 mac = sys.platform == "darwin"
 datas = [(str(root / "assets"), "assets"), (str(root / "samples"), "samples"),
          (str(root / "work/dependency-licenses"), "dependency-licenses")]
+binaries = []
+if sys.platform == "win32":
+    # A venv made from Conda can import _sqlite3, but PyInstaller does not
+    # search the base environment's Library/bin for its dependent DLL.
+    sqlite_dll = Path(sys.base_prefix) / "Library" / "bin" / "sqlite3.dll"
+    if sqlite_dll.is_file():
+        binaries.append((str(sqlite_dll), "."))
 if mac:
     datas += [(str(root / name), ".") for name in ("README.md", "LICENSE", "THIRD_PARTY.md", "CHANGELOG.md", "DEVELOPMENT.md", "VALIDATION.md", "VALIDATION.json")]
     datas += [(str(root / "licenses"), "licenses"), (str(root / "plugins"), "plugins"),
               (str(root / "work/PDFReader-source.zip"), ".")]
-a = Analysis([str(root / "main.py")], pathex=[str(root)], datas=datas,
+a = Analysis([str(root / "main.py")], pathex=[str(root)], datas=datas, binaries=binaries,
              hiddenimports=["keyring.backends.macOS"] if mac else [],
              excludes=["winpty", "pyte", "wcwidth", "pytest"] + ([] if mac else ["keyring", "cryptography"]))
 pyz = PYZ(a.pure)
