@@ -186,3 +186,76 @@ def test_pen_stroke_draws_without_placement_box(qapp, pdf_path, tmp_path, monkey
     assert window.document.annotations()[0]["type"] == "Ink"
     window.undo()
     window.close()
+
+
+def test_annotation_edits_refresh_only_their_pages_and_preserve_search(qapp, pdf_path, tmp_path, monkeypatch):
+    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
+    try:
+        document, view = window.document, window.view
+        window.mutate(lambda: document.add_comment(1, (80, 160), "other page"))
+        other_row = window.comment_list.item(0)
+        scene_items = tuple(view.items_by_page)
+        window.show_search()
+        window.search_input.setText("reading")
+        window.search()
+        hits = list(window.search_results)
+        queries = []
+        original = document.annotations
+        def tracked(page=None):
+            queries.append(page)
+            return original(page)
+        monkeypatch.setattr(document, "annotations", tracked)
+        def no_reset(*args):
+            raise AssertionError("Annotation edit rebuilt the document or thumbnails")
+        monkeypatch.setattr(view, "rebuild", no_reset)
+        monkeypatch.setattr(window.thumbnails, "set_document", no_reset)
+        cached = view.renderer.display_list(1)
+        list(view.renderer.visible_tiles(1, (0, 0, 60, 60), 2))
+        assert window.mutate(lambda: document.add_comment(0, (70, 160), "new"))
+        xref = view.annotations_by_page[0][0]["xref"]
+        assert window.mutate(lambda: document.edit_comment(0, xref, "updated"))
+        assert "updated" in window.comment_list.item(0).text()
+        assert window.comment_list.item(1) is other_row
+        assert window.mutate(lambda: document.delete_annotation(0, xref))
+        window.undo()
+        assert "updated" in window.comment_list.item(0).text()
+        window.redo()
+        assert window.comment_list.count() == 1 and window.comment_list.item(0) is other_row
+        assert queries == [0] * 5
+        assert tuple(view.items_by_page) == scene_items and view.renderer.display_list(1) is cached
+        assert any(key[0] == 1 for key in view.renderer.tiles)
+        assert hits and window.search_results == hits and not window.search_timer.isActive()
+        box = (55, 45, 90, 60)
+        assert window.mutate(lambda: document.add_markup_ranges({0: [box], 1: [box]}))
+        assert set(queries[-2:]) == {0, 1}
+    finally:
+        window.document.saved_state = window.document.state
+        window.close()
+
+
+def test_only_painted_thumbnails_are_rendered_and_tab_switch_discards_work(qapp, pdf_path, tmp_path, monkeypatch, qt_wait):
+    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
+    try:
+        for _ in range(80):
+            window.document.doc.new_page()
+        window.after_change()
+        thumbs = window.thumbnails
+        qapp.processEvents()
+        assert not thumbs.pages.icons and not thumbs.timer.isActive()
+        window.toggle_left()
+        qt_wait(lambda: 0 in thumbs.pages.icons and not thumbs.timer.isActive())
+        assert len(thumbs.pages.icons) < 12
+        first = thumbs.pages.icons[0].cacheKey()
+        window.mutate(lambda: window.document.add_comment(0, (80, 200), "visible"))
+        qt_wait(lambda: 0 in thumbs.pages.icons and thumbs.pages.icons[0].cacheKey() != first)
+        thumbs.scrollTo(thumbs.pages.index(60), thumbs.ScrollHint.PositionAtTop)
+        qt_wait(lambda: 60 in thumbs.pages.icons and not thumbs.timer.isActive())
+        window.toggle_left()
+        assert not thumbs.pending and not thumbs.timer.isActive()
+        window.new_document()
+        qapp.processEvents()
+        assert thumbs.pages.rowCount() == 1 and not thumbs.pages.icons
+    finally:
+        for session in window.sessions:
+            session.document.saved_state = session.document.state
+        window.close()

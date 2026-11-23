@@ -4,7 +4,10 @@ OCR uses a separate process: MuPDF must not be used concurrently in threads.
 Coordinates exposed here are unrotated PDF points, relative to the page crop.
 """
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from typing import BinaryIO
 import os
 import math
 import tempfile
@@ -22,6 +25,15 @@ class PasswordRequired(PdfError):
     pass
 
 
+@dataclass
+class HistoryEntry:
+    file: BinaryIO
+    size: int
+    state: str
+    label: str
+    annotation_pages: frozenset[int] | None
+
+
 class PdfDocument:
     HISTORY_LIMIT = 20
     HISTORY_BYTES = 192 * 1024 * 1024
@@ -35,6 +47,7 @@ class PdfDocument:
         self.revision = 0
         self.undo_stack = []
         self.redo_stack = []
+        self.changed_annotation_pages = None
 
     @property
     def dirty(self):
@@ -65,8 +78,7 @@ class PdfDocument:
         self.state = uuid.uuid4().hex
         self.saved_state = self.state
         self.revision += 1
-        self.undo_stack.clear()
-        self.redo_stack.clear()
+        self._clear_history()
 
     def new(self):
         if self.doc is not None:
@@ -78,17 +90,55 @@ class PdfDocument:
         self.state = uuid.uuid4().hex
         self.saved_state = ""
         self.revision += 1
-        self.undo_stack.clear()
-        self.redo_stack.clear()
+        self._clear_history()
 
     def snapshot(self):
         return self.doc.tobytes(encryption=fitz.PDF_ENCRYPT_KEEP)
 
-    def _restore(self, data, state):
-        loaded = self._load(data)
+    def _clear_history(self):
+        for stack in (self.undo_stack, self.redo_stack):
+            for entry in stack:
+                entry.file.close()
+            stack.clear()
+        self.changed_annotation_pages = None
+
+    def _history_entry(self, label, pages):
+        # The OS removes a rolled-over temporary file when its handle closes.
+        file = tempfile.SpooledTemporaryFile(max_size=self.HISTORY_BYTES, mode="w+b")
+        try:
+            if len(self.doc.stream or b"") > self.HISTORY_BYTES:
+                file.rollover()
+            # PyMuPDF treats objects exposing .name as paths. Supply only the
+            # stream methods so that it writes to our existing private handle.
+            output = SimpleNamespace(write=file.write, seek=file.seek,
+                                     tell=file.tell, truncate=file.truncate)
+            self.doc.save(output, encryption=fitz.PDF_ENCRYPT_KEEP)
+            return HistoryEntry(file, file.seek(0, os.SEEK_END), self.state, label, pages)
+        except BaseException:
+            file.close()
+            raise
+
+    def _remember(self, stack, entry):
+        stack.append(entry)
+        stacks = (self.undo_stack, self.redo_stack)
+        total = sum(item.size for history in stacks for item in history)
+        while sum(map(len, stacks)) > self.HISTORY_LIMIT or total > self.HISTORY_BYTES:
+            # Preserve the immediate reverse operation even if it alone is
+            # larger than the entire memory budget. Its data is already on disk.
+            candidates = [h for h in stacks if len(h) > (1 if h is stack else 0)]
+            if not candidates:
+                break
+            oldest = max(candidates, key=len).pop(0)
+            total -= oldest.size
+            oldest.file.close()
+
+    def _restore(self, entry):
+        entry.file.seek(0)
+        loaded = self._load(entry.file.read())
         self.doc.close()
         self.doc = loaded
-        self.state = state
+        self.state = entry.state
+        self.changed_annotation_pages = entry.annotation_pages
         self.revision += 1
 
     def require_permission(self, annotation=False):
@@ -97,38 +147,45 @@ class PdfDocument:
             raise PdfError("此 PDF 的权限限制了这项操作，请使用有编辑权限的副本。")
 
     @contextmanager
-    def change(self, label, annotation=False):
+    def change(self, label, annotation=False, annotation_pages=None):
         self.require_permission(annotation)
-        before = (self.snapshot(), self.state, label)
+        pages = None if annotation_pages is None else frozenset(annotation_pages)
+        before = self._history_entry(label, pages)
         try:
             yield
         except Exception:
-            self._restore(before[0], before[1])
+            try:
+                self._restore(before)
+            finally:
+                before.file.close()
             raise
-        self.undo_stack.append(before)
+        for entry in self.redo_stack:
+            entry.file.close()
         self.redo_stack.clear()
-        while len(self.undo_stack) > self.HISTORY_LIMIT or (
-            sum(len(x[0]) for x in self.undo_stack) > self.HISTORY_BYTES
-        ):
-            self.undo_stack.pop(0)
+        self._remember(self.undo_stack, before)
+        self.changed_annotation_pages = pages
         self.state = uuid.uuid4().hex
         self.revision += 1
 
-    def undo(self):
-        if not self.undo_stack:
+    def _step_history(self, source, destination):
+        if not source:
             return False
-        data, state, label = self.undo_stack.pop()
-        self.redo_stack.append((self.snapshot(), self.state, label))
-        self._restore(data, state)
+        target = source[-1]
+        current = self._history_entry(target.label, target.annotation_pages)
+        try:
+            self._restore(target)
+        except BaseException:
+            current.file.close()
+            raise
+        source.pop().file.close()
+        self._remember(destination, current)
         return True
 
+    def undo(self):
+        return self._step_history(self.undo_stack, self.redo_stack)
+
     def redo(self):
-        if not self.redo_stack:
-            return False
-        data, state, label = self.redo_stack.pop()
-        self.undo_stack.append((self.snapshot(), self.state, label))
-        self._restore(data, state)
-        return True
+        return self._step_history(self.redo_stack, self.undo_stack)
 
     def save(self, destination=None):
         target = Path(destination or self.path or "").resolve()
@@ -305,7 +362,7 @@ class PdfDocument:
     def add_markup_ranges(self, groups, kind="highlight", color=(1, .79, .14), content=""):
         if not any(groups.values()):
             raise PdfError("选区中没有文字。扫描页请先完成 OCR。")
-        with self.change("文字标记", annotation=True):
+        with self.change("文字标记", annotation=True, annotation_pages=(int(n) for n, boxes in groups.items() if boxes)):
             for number, boxes in groups.items():
                 if not boxes:
                     continue
@@ -323,15 +380,15 @@ class PdfDocument:
                 annot.update()
 
     def add_comment(self, page, point, text):
-        with self.change("添加评论", annotation=True):
+        with self.change("添加评论", annotation=True, annotation_pages=(page,)):
             p = self.doc[page]
             a = p.add_text_annot(point, text, icon="Comment")
             a.set_info(title="我", subject="评论")
             a.update()
 
-    def annotations(self):
+    def annotations(self, page=None):
         result = []
-        for p in self.doc:
+        for p in (self.doc if page is None else (self.doc[page],)):
             for a in p.annots() or []:
                 kind, quote = self.doc.xref_get_key(a.xref, "PRQuote")
                 vertices = a.vertices or []
@@ -344,14 +401,14 @@ class PdfDocument:
         return result
 
     def edit_comment(self, page, xref, text):
-        with self.change("修改评论", annotation=True):
+        with self.change("修改评论", annotation=True, annotation_pages=(page,)):
             p = self.doc[page]
             a = p.load_annot(xref)
             a.set_info(content=text)
             a.update()
 
     def delete_annotation(self, page, xref):
-        with self.change("删除批注", annotation=True):
+        with self.change("删除批注", annotation=True, annotation_pages=(page,)):
             p = self.doc[page]
             p.delete_annot(p.load_annot(xref))
 
@@ -425,7 +482,7 @@ class PdfDocument:
         valid = [[tuple(fitz.Point(p)) for p in stroke] for stroke in strokes if len(stroke) > 1]
         if not valid:
             raise PdfError("请先绘制笔迹。")
-        with self.change("手写签名" if signature else "画笔", annotation=True):
+        with self.change("手写签名" if signature else "画笔", annotation=True, annotation_pages=(page,)):
             p = self.doc[page]
             a = p.add_ink_annot(valid)
             a.set_colors(stroke=color)
@@ -504,7 +561,7 @@ class PdfDocument:
         if self.doc is not None:
             self.doc.close()
             self.doc = None
-        self.undo_stack.clear(); self.redo_stack.clear()
+        self._clear_history()
         self.password=""
 
 

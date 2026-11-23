@@ -25,6 +25,36 @@ def resident_bytes():
     return int(subprocess.check_output(["/bin/ps","-o","rss=","-p",str(os.getpid())],text=True).strip())*1024
 
 
+def long_document_annotations(window, settle):
+    from .engine import PdfDocument
+
+    document = PdfDocument()
+    document.new()
+    for n in range(1, 1500):
+        document.doc.new_page(width=550 + n % 3 * 10, height=700 + n % 5 * 12)
+    window.add_document(document)
+    settle()
+    timings, queries = [], []
+    annotations = document.annotations
+    def tracked(page=None):
+        queries.append(page)
+        return annotations(page)
+    document.annotations = tracked
+    try:
+        for n in range(5):
+            start = time.perf_counter()
+            assert window.mutate(lambda: document.add_comment(750, (75, 75 + n), "Test note"))
+            timings.append((time.perf_counter() - start) * 1000)
+    finally:
+        del document.annotations
+    settle()
+    assert queries == [750] * len(timings)
+    assert not window.thumbnails.pages.icons and not window.thumbnails.timer.isActive()
+    return {"pages": document.count, "edits": len(timings), "full_annotation_scans": queries.count(None),
+            "hidden_thumbnail_images": len(window.thumbnails.pages.icons),
+            "median_ms": round(statistics.median(timings), 2), "max_ms": round(max(timings), 2)}
+
+
 def performance(directory,filename=None):
     root=Path(directory).resolve(); root.mkdir(parents=True,exist_ok=True)
     os.environ["PDFREADER_DATA_DIR"]=str(root/"settings")
@@ -82,7 +112,8 @@ def performance(directory,filename=None):
         assert max(timings)<2000,"A light-fixture reading operation blocked for over two seconds"
         assert sum(value[1] for value in fonts._face_cache.values())<=fonts.FONT_CACHE_BYTES
         assert sum(len(value) for value in fonts._subset_cache.values())<=8*1024*1024
-        result.update(ok=True,editor_cycles=48,signature_dialog_cycles=10,
+        annotation_metrics = long_document_annotations(window, settle)
+        result.update(ok=True,long_document_annotations=annotation_metrics,editor_cycles=48,signature_dialog_cycles=10,
                       memory_before_bytes=baseline,memory_after_bytes=after,memory_growth_bytes=growth,
                       unclosed_editors=0,unused_qt_fonts=len(fonts._qt_fonts),reading_operations=200,reading_second_half_memory_growth_bytes=reading_growth,
                       reading_median_ms=round(statistics.median(timings),2),

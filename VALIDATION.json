@@ -1,17 +1,20 @@
 {
-  "version": "0.8.1",
-  "date": "2026-11-01",
+  "version": "0.8.2",
+  "date": "2026-11-23",
   "local_windows_tests": {
-    "passed": 203,
+    "passed": 214,
     "skipped": 1
   },
-  "smoke_check_count": 29,
+  "smoke_check_count": 32,
   "performance_test": {
     "editor_cycles": 48,
     "signature_dialog_cycles": 10,
     "reading_operations": 200,
-    "raster_cache_bytes": 67108864
+    "raster_cache_bytes": 67108864,
+    "long_document_pages": 1500,
+    "long_document_annotation_edits": 5
   },
+  "large_undo_windows": {"pdf_bytes": 201327268, "snapshot_bytes": 201327314, "undo_and_redo_verified": true},
   "native_platform_reports": "GitHub Releases: PDFReader-validation-*.json",
   "workflow": "https://github.com/XjunLi/MyPDF/actions/workflows/build.yml",
   "real_ai_service_called": false,

@@ -30,6 +30,18 @@ class PageRenderer:
         self.bytes = 0
         self.revision = self.document.revision
 
+    def invalidate_pages(self, numbers):
+        if self.revision not in (self.document.revision - 1, self.document.revision):
+            self.clear()
+            return
+        for number in numbers:
+            self.lists.pop(number, None)
+        for key in list(self.tiles):
+            if key[0] in numbers:
+                image, _, _ = self.tiles.pop(key)
+                self.bytes -= image.sizeInBytes()
+        self.revision = self.document.revision
+
     def display_list(self, number):
         if self.revision != self.document.revision:
             self.clear()

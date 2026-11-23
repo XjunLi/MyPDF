@@ -121,6 +121,67 @@ def test_encrypted_save_undo_and_reopen(pdf_path, tmp_path):
     document.close()
 
 
+def test_oversized_undo_redo_preserves_encryption_and_releases_temp_files(pdf_path, tmp_path, monkeypatch):
+    import tempfile
+
+    path = tmp_path / "encrypted-history.pdf"
+    with fitz.open(pdf_path) as pdf:
+        pdf.save(path, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw="owner", user_pw="reader",
+                 permissions=fitz.PDF_PERM_ANNOTATE | fitz.PDF_PERM_COPY)
+    files = []
+    temporary_file = tempfile.TemporaryFile
+    def track_file(*args, **kwargs):
+        file = temporary_file(*args, **kwargs)
+        files.append(file)
+        return file
+    monkeypatch.setattr(tempfile, "TemporaryFile", track_file)
+    doc = PdfDocument()
+    doc.HISTORY_BYTES = 128
+    try:
+        doc.open(path, "reader")
+        doc.add_comment(0, (70, 150), "first")
+        assert len(files) == 1 and not files[0].closed
+        files[0].seek(0)
+        with fitz.open(stream=files[0].read(), filetype="pdf") as stored:
+            assert stored.needs_pass and stored.authenticate("reader")
+        doc.add_comment(1, (70, 150), "second")
+        assert files[0].closed and len(doc.undo_stack) == 1
+        assert doc.undo() and [a["text"] for a in doc.annotations()] == ["first"]
+        assert doc.redo() and len(doc.annotations()) == 2
+        doc.save(path)
+        assert doc.undo() and doc.dirty
+        old_redo = files[-1]
+        doc.add_comment(0, (70, 180), "branched")
+        assert old_redo.closed and not doc.redo()
+        assert sum(not f.closed for f in files) == 1
+    finally:
+        doc.close()
+    assert all(f.closed for f in files)
+
+
+def test_failed_history_io_preserves_document_and_current_undo(document, monkeypatch):
+    import tempfile
+
+    document.HISTORY_BYTES = 128
+    document.add_comment(0, (70, 150), "kept")
+    state = document.state
+    target = document.undo_stack[-1]
+    def fail(*args, **kwargs):
+        raise OSError("temporary storage unavailable")
+    with monkeypatch.context() as patch:
+        patch.setattr(tempfile, "TemporaryFile", fail)
+        with pytest.raises(OSError):
+            document.add_comment(1, (70, 150), "incomplete")
+    with monkeypatch.context() as patch:
+        patch.setattr(document, "_load", fail)
+        with pytest.raises(OSError):
+            document.undo()
+    assert document.state == state and document.undo_stack == [target] and not document.redo_stack
+    assert [a["text"] for a in document.annotations()] == ["kept"]
+    assert document.undo() and not document.annotations()
+    assert target.file.closed
+
+
 def test_read_only_pdf_enforces_edit_permission(pdf_path, tmp_path):
     path = tmp_path / "readonly.pdf"
     with fitz.open(pdf_path) as d:

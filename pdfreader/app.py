@@ -1,11 +1,12 @@
 from pathlib import Path
+from bisect import bisect_left
 import json
 import os
 import sys
 
 import pymupdf as fitz
-from PySide6.QtCore import Qt, QSize, QTimer, QProcess, QTemporaryDir, QUrl
-from PySide6.QtGui import (QAction, QActionGroup, QIcon, QImage, QPixmap, QKeySequence,
+from PySide6.QtCore import Qt, QTimer, QProcess, QTemporaryDir, QUrl
+from PySide6.QtGui import (QAction, QActionGroup, QIcon, QImage, QKeySequence,
     QPainter, QPageLayout, QDesktopServices)
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QToolBar, QSplitter, QTabWidget, QStackedWidget,
@@ -44,8 +45,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.ocr_pending_open = None
         self.search_results = []
         self.search_index = -1
-        self.thumb_done = set()
-        self.thumb_queue = []
         self.edit_actions = []
         self.doc_actions = []
         self.document_epoch = 0
@@ -64,10 +63,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         self._build_ui()
         self._build_menus()
-        self.thumb_timer = QTimer(self)
-        self.thumb_timer.setInterval(30)
-        self.thumb_timer.timeout.connect(self.render_next_thumb)
-        self.thumb_timer.start()
         self.ocr_timer = QTimer(self)
         self.ocr_timer.setInterval(350)
         self.ocr_timer.timeout.connect(self.poll_ocr_progress)
@@ -201,7 +196,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
     def toggle_left(self):
         self.left.setVisible(not self.left.isVisible())
         self.left_action.setChecked(self.left.isVisible())
-        self.queue_visible_thumbs()
 
     def show_panel(self, key):
         widget = {"ai": self.ai, "comment": self.comments}[key]
@@ -297,23 +291,27 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
     def error(self, exc):
         QMessageBox.warning(self, "操作未完成", str(exc))
 
-    def after_change(self, keep_position=True):
+    def after_change(self, keep_position=True, annotation_pages=None):
         self.stack.setCurrentWidget(self.view)
-        self.search_timer.stop()
-        self.search_generation += 1
-        self.search_running = False
-        self.search_query = ""
-        self.search_count.clear()
-        self.view.search_boxes.clear()
-        self.search_results.clear()
-        self.search_index = -1
-        self.view.rebuild(keep_position)
-        self.rebuild_sidebar()
-        self.update_comments()
+        if annotation_pages is None:
+            self.search_timer.stop()
+            self.search_generation += 1
+            self.search_running = False
+            self.search_query = ""
+            self.search_count.clear()
+            self.view.search_boxes.clear()
+            self.search_results.clear()
+            self.search_index = -1
+            self.view.rebuild(keep_position)
+            self.rebuild_sidebar()
+            if self.search_bar.isVisible() and self.search_input.text().strip():
+                self.search_timer.start()
+        else:
+            self.view.refresh_annotations(annotation_pages)
+            self.thumbnails.invalidate_pages(annotation_pages)
+        self.update_comments(annotation_pages)
         self.update_state()
         self.ai.update_preview()
-        if self.search_bar.isVisible() and self.search_input.text().strip():
-            self.search_timer.start()
 
     def mutate(self, function, preserve_draft=False):
         if not self.document.count:
@@ -322,10 +320,12 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         resume_ocr = (self.ocr_process is not None and self.auto_ocr.isChecked()
                       and (not self.ocr_cancelled or self.ocr_pending_open == self.document_epoch))
         self.cancel_ocr()
+        revision = self.document.revision
         try:
             function()
             if preserve_draft: self.view.dismiss_inline_text()
-            self.after_change()
+            pages = self.document.changed_annotation_pages if self.document.revision == revision + 1 else None
+            self.after_change(annotation_pages=pages)
             return True
         except Exception as exc:
             if preserve_draft:
@@ -348,19 +348,8 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.mutate(self.document.redo)
 
     def rebuild_sidebar(self):
-        current = self.view.current_page
-        scroll_value = self.thumbnails.verticalScrollBar().value()
-        self.thumbnails.clear()
-        self.thumb_done.clear()
-        self.thumb_queue.clear()
-        for n in range(self.document.count):
-            item = QListWidgetItem(str(n + 1))
-            item.setData(Qt.ItemDataRole.UserRole, n)
-            item.setSizeHint(QSize(138, 172))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.thumbnails.addItem(item)
-        self.thumbnails.setCurrentRow(current)
-        self.thumbnails.verticalScrollBar().setValue(scroll_value)
+        self.thumbnails.set_document(self.document)
+        self.thumbnails.select_page(self.view.current_page)
         self.bookmarks.clear()
         parents = [self.bookmarks.invisibleRootItem()]
         for level, title, page in self.document.doc.get_toc() if self.document.count else []:
@@ -371,31 +360,12 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             parents[-1].addChild(item)
             parents.append(item)
         self.bookmarks.expandToDepth(0)
-        QTimer.singleShot(0, self.queue_visible_thumbs)
-
-    def queue_visible_thumbs(self, *_):
-        rect = self.thumbnails.viewport().rect()
-        visible = [n for n in range(self.thumbnails.count()) if self.thumbnails.visualItemRect(self.thumbnails.item(n)).intersects(rect)]
-        self.thumb_queue = [n for n in visible if n not in self.thumb_done]
-
-    def render_next_thumb(self):
-        if not self.thumb_queue or not self.document.count:
-            return
-        number = self.thumb_queue.pop(0)
-        if number >= self.document.count:
-            return
-        p = self.document.doc[number]
-        scale = min(108 / max(p.rect.width, 1), 144 / max(p.rect.height, 1))
-        pix = p.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
-        self.thumbnails.item(number).setIcon(QIcon(QPixmap.fromImage(image)))
-        self.thumb_done.add(number)
 
     def page_changed(self, number):
         # Do not replace a page number while the user is typing a destination.
         if not self.page_spin.lineEdit().isModified():
             self.page_spin.setValue(number + 1)
-        self.thumbnails.setCurrentRow(number)
+        self.thumbnails.select_page(number)
         self.previous_action.setEnabled(bool(self.document.count and number > 0))
         self.next_action.setEnabled(number + 1 < self.document.count)
         self.ai.update_preview()
@@ -535,23 +505,39 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         else:
             self.status_label.setText("这里没有文字块；扫描页请先 OCR，或使用「加文字」单击放置文字框。")
 
-    def update_comments(self):
-        self.comment_list.clear()
+    def update_comments(self, pages=None):
+        if pages is None:
+            self.comment_list.clear()
+            pages = self.view.annotations_by_page
         if not self.document.count:
             return
-        labels = {"Highlight": "高亮", "Underline": "下划线", "StrikeOut": "删除线", "Text": "评论", "Ink": "笔迹"}
-        for entry in self.document.annotations():
-            title = entry["subject"] or labels.get(entry["type"], entry["type"])
-            body = entry["text"] or "双击可添加备注"
-            quote = f"「{entry['quote'][:140]}」\n" if entry.get("quote") else ""
-            item = QListWidgetItem(f"第 {entry['page'] + 1} 页 · {title}\n{quote}{body[:250]}")
-            item.setToolTip((quote + entry["text"]).strip())
-            item.setData(Qt.ItemDataRole.UserRole, entry)
-            self.comment_list.addItem(item)
+        role = Qt.ItemDataRole.UserRole
+        if self.comment_list.count() and self.comment_list.item(0).data(role) is None:
+            self.comment_list.clear()
+        def page_at(row):
+            return self.comment_list.item(row).data(role)["page"]
+        for page in sorted(pages):
+            row = bisect_left(range(self.comment_list.count()), page, key=page_at)
+            while row < self.comment_list.count() and page_at(row) == page:
+                self.comment_list.takeItem(row)
+            for entry in self.view.annotations_by_page.get(page, ()):
+                self.comment_list.insertItem(row, self.comment_item(entry))
+                row += 1
         if not self.comment_list.count():
             item = QListWidgetItem("还没有批注\n使用高亮、评论或画笔记录你的想法。")
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.comment_list.addItem(item)
+
+    @staticmethod
+    def comment_item(entry):
+        labels = {"Highlight": "高亮", "Underline": "下划线", "StrikeOut": "删除线", "Text": "评论", "Ink": "笔迹"}
+        title = entry["subject"] or labels.get(entry["type"], entry["type"])
+        body = entry["text"] or "双击可添加备注"
+        quote = f"「{entry['quote'][:140]}」\n" if entry.get("quote") else ""
+        item = QListWidgetItem(f"第 {entry['page'] + 1} 页 · {title}\n{quote}{body[:250]}")
+        item.setToolTip((quote + entry["text"]).strip())
+        item.setData(Qt.ItemDataRole.UserRole, entry)
+        return item
 
     def select_comment(self, item):
         entry = item.data(Qt.ItemDataRole.UserRole)
@@ -990,7 +976,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.cancel_ocr()
         self.search_generation += 1
         self.search_timer.stop()
-        self.thumb_timer.stop()
+        self.thumbnails.timer.stop()
         if self.ocr_process:
             self.ocr_process.waitForFinished(2000)
         self.ai.shutdown()

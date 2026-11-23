@@ -15,6 +15,9 @@ def exercise_editing(window,root,output):
         page.draw_rect((30,25,470,110),fill=(.94,.97,1),color=None)
         page.insert_text((50,70),"Editable heading",fontname="hebo",fontsize=18.5,color=(.15,.3,.65))
         page.insert_text((50,150),"Select text, choose a color, and keep reading.",fontsize=12)
+        doc.new_page(width=500,height=700)
+        doc[0].insert_link({"kind": fitz.LINK_GOTO, "from": fitz.Rect(50,510,220,545),
+                            "page": 1, "to": fitz.Point(40,100)})
         doc.save(fixture)
     window.open_file(fixture); window.toggle_panel(None); window.view.fit_page(); app.processEvents()
     def inline_metrics(editor):
@@ -30,6 +33,26 @@ def exercise_editing(window,root,output):
         local=fitz.Point(point)*page.rotation_matrix
         position=window.view.mapFromScene(window.view.items_by_page[0].mapToScene(QPointF(local.x,local.y)))
         QTest.mouseClick(window.view.viewport(),Qt.MouseButton.LeftButton,pos=position)
+    click((100,525))
+    assert window.view.current_page == 1
+    window.view.goto(0)
+    output["checks"].append("body_link_click_jumps_to_pdf_destination")
+    original_budget = window.document.HISTORY_BYTES
+    window.document.HISTORY_BYTES = 128
+    other_page = window.view.items_by_page[1]
+    cached = window.view.renderer.display_list(1)
+    try:
+        assert window.mutate(lambda: window.document.add_comment(0, (80,300), "Temporary note"))
+        assert window.document.undo_stack[-1].size > window.document.HISTORY_BYTES
+        window.undo()
+        assert not window.document.annotations(0)
+        window.redo()
+        assert window.document.annotations(0)[0]["text"] == "Temporary note"
+        window.undo()
+        assert window.view.items_by_page[1] is other_page and window.view.renderer.display_list(1) is cached
+    finally:
+        window.document.HISTORY_BYTES = original_budget
+    output["checks"].extend(["oversized_snapshot_undo_and_redo", "annotation_edit_keeps_other_page_and_render_cache"])
     window.mode_actions["edit"].trigger(); click((100,65))
     editor=window.view.inline_editor
     assert editor is not None and editor.region

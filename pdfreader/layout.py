@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
     QAbstractSpinBox, QTabBar)
 from .icons import icon, icon_button, split_tool_button
 from .viewer import PdfView
+from .thumbnails import ThumbnailView
 from .panels import AIPanel
 from .paths import resource_root
 from .application import shortcut_text
@@ -262,17 +263,9 @@ class ReaderLayout:
         self.left.setMinimumWidth(160)
         self.left.setMaximumWidth(300)
         self.left.setIconSize(QSize(18, 18))
-        self.thumbnails = QListWidget()
+        self.thumbnails = ThumbnailView()
         self.thumbnails.setObjectName("thumbnails")
-        self.thumbnails.setViewMode(QListWidget.ViewMode.IconMode)
-        self.thumbnails.setFlow(QListWidget.Flow.TopToBottom)
-        self.thumbnails.setWrapping(False)
-        self.thumbnails.setMovement(QListWidget.Movement.Static)
-        self.thumbnails.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.thumbnails.setIconSize(QSize(108, 144))
-        self.thumbnails.setSpacing(3)
-        self.thumbnails.itemClicked.connect(lambda item: self.view.goto(item.data(Qt.ItemDataRole.UserRole)))
-        self.thumbnails.verticalScrollBar().valueChanged.connect(self.queue_visible_thumbs)
+        self.thumbnails.clicked.connect(lambda index: self.view.goto(index.row()))
         self.bookmarks = QTreeWidget()
         self.bookmarks.setHeaderHidden(True)
         self.bookmarks.itemClicked.connect(lambda item, column: self.view.goto(item.data(0, Qt.ItemDataRole.UserRole)))

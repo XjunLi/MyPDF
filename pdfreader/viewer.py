@@ -1,8 +1,8 @@
 from collections import OrderedDict
 import math
 import pymupdf as fitz
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen, QTransform
+from PySide6.QtCore import Qt, QRectF, QPointF, QUrl, Signal, QTimer
+from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsItem, QApplication, QMenu
 from .text_selection import TextPage, distance_to_rect
 from .rendering import PageRenderer
@@ -103,7 +103,9 @@ class PdfView(QGraphicsView):
         self.ink_color=QColor("#25364c"); self.ink_width=1.1
         self.press_pos = None
         self.point_dragged = False
-        self.annotation_hits = []
+        self.annotations_by_page = {}
+        self.link_page = None
+        self.page_links = []
         self.fit_mode, self.rebuilding = True, False
         self.verticalScrollBar().valueChanged.connect(self._page_at_center)
         self.resize_timer = QTimer(self)
@@ -115,11 +117,29 @@ class PdfView(QGraphicsView):
         self.horizontalScrollBar().valueChanged.connect(lambda:self.inline_editor.position() if self.inline_editor else None)
 
     def clear_selection(self):
+        marked = set(self.text_boxes)
+        if self.selection:
+            marked.add(self.selection[0])
         self.text_boxes.clear()
         self.selected_text = ""
         self.selection = self.text_anchor = self.text_focus = None
         self.selectionChanged.emit("")
-        self.viewport().update()
+        for number in marked:
+            if number < len(self.items_by_page):
+                self.items_by_page[number].update()
+
+    def refresh_annotations(self, numbers):
+        self.renderer.invalidate_pages(numbers)
+        self.clear_selection()
+        for number in numbers:
+            entries = self.document.annotations(number)
+            if entries:
+                self.annotations_by_page[number] = entries
+            else:
+                self.annotations_by_page.pop(number, None)
+            self.items_by_page[number].update()
+        if self.link_page in numbers:
+            self.link_page = None
 
     def rebuild(self, keep_position=True):
         number = min(self.current_page, max(0, self.document.count - 1)) if keep_position else 0
@@ -133,7 +153,12 @@ class PdfView(QGraphicsView):
         self.dragging_text = False
         self.drag_page = self.drag_start = None
         self.ink = []
-        self.annotation_hits = self.document.annotations() if self.document.count else []
+        self.annotations_by_page.clear()
+        if self.document.count:
+            for entry in self.document.annotations():
+                self.annotations_by_page.setdefault(entry["page"], []).append(entry)
+        self.link_page = None
+        self.page_links.clear()
         if self.inline_editor: self.inline_editor.detach()
         self.scene_obj.clear()
         self.items_by_page.clear()
@@ -268,12 +293,23 @@ class PdfView(QGraphicsView):
             self.current_page = number
             self.pageChanged.emit(number)
 
-    def goto(self, page, rect=None):
+    def goto(self, page, rect=None, *, destination=None):
         if not self.items_by_page:
             return
         page = max(0, min(int(page), len(self.items_by_page) - 1))
         item = self.items_by_page[page]
-        if rect is not None:
+        if destination is not None:
+            # MuPDF resolves PDF destinations in the target's rotated display space.
+            x, y = destination
+            x = x if math.isfinite(x) else 0
+            y = y if math.isfinite(y) else 0
+            target = self.mapFromScene(item.mapToScene(QPointF(x, y)))
+            if target.x() < 0 or target.x() >= self.viewport().width():
+                hbar = self.horizontalScrollBar()
+                hbar.setValue(hbar.value() + target.x() - 24)
+            vbar = self.verticalScrollBar()
+            vbar.setValue(vbar.value() + target.y() - 24)
+        elif rect is not None:
             r = fitz.Rect(rect) * self.document.doc[page].rotation_matrix
             self.centerOn(item.mapToScene(QPointF((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)))
         else:
@@ -361,7 +397,7 @@ class PdfView(QGraphicsView):
             caret = self.text_page(number).caret(point, near=True)
             if caret is None:
                 self.clear_selection()
-                if not self.text_page(number).glyphs:
+                if not self.text_page(number).glyphs and not self.link_at(number, point):
                     self.message.emit("此页没有文字层，完成 OCR 后即可划词。")
                 event.accept()
                 return
@@ -384,6 +420,9 @@ class PdfView(QGraphicsView):
     def mouseMoveEvent(self, event):
         if self.inline_editor and self.scene_obj.mouseGrabberItem() is self.inline_editor.proxy:
             return super().mouseMoveEvent(event)
+        if (self.mode == "select" and self.press_pos is not None and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.position().toPoint() - self.press_pos).manhattanLength() >= QApplication.startDragDistance()):
+            self.point_dragged = True
         if self.dragging_text:
             self.drag_pos = event.position().toPoint()
             self._extend_text_selection(self.drag_pos)
@@ -404,8 +443,12 @@ class PdfView(QGraphicsView):
         else:
             if self.mode == "select":
                 hit = self.locate(event.position().toPoint())
-                on_text = hit and self.text_page(hit[0]).caret(hit[1], near=True) is not None
-                self.viewport().setCursor(Qt.CursorShape.IBeamCursor if on_text else Qt.CursorShape.ArrowCursor)
+                cursor = Qt.CursorShape.ArrowCursor
+                if hit and self.link_at(*hit):
+                    cursor = Qt.CursorShape.PointingHandCursor
+                elif hit and self.text_page(hit[0]).caret(hit[1], near=True) is not None:
+                    cursor = Qt.CursorShape.IBeamCursor
+                self.viewport().setCursor(cursor)
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -419,13 +462,13 @@ class PdfView(QGraphicsView):
         if self.dragging_text:
             self._extend_text_selection(event.position().toPoint())
             self.dragging_text = False
-            if not self.text_boxes:
-                self.activate_annotation(event.position().toPoint())
+            if not self.text_boxes and not event.modifiers():
+                self.activate_at(event.position().toPoint())
             event.accept()
             return
         if self.drag_page is None:
-            if self.mode == "select":
-                self.activate_annotation(event.position().toPoint())
+            if self.mode == "select" and not event.modifiers():
+                self.activate_at(event.position().toPoint())
             return super().mouseReleaseEvent(event)
         number, point, selection, ink = self.drag_page, self.drag_start, self.selection, self.ink[:]
         self.drag_page = self.drag_start = None
@@ -480,17 +523,50 @@ class PdfView(QGraphicsView):
         if self.selected_text:
             QApplication.clipboard().setText(self.selected_text)
 
-    def activate_annotation(self, position):
-        if self.press_pos is None or (position - self.press_pos).manhattanLength() >= QApplication.startDragDistance():
+    def link_at(self, number, point):
+        if self.link_page != number:
+            page = self.document.doc[number]
+            links = []
+            link = page.first_link
+            while link:
+                uri = link.uri or ""
+                target = None
+                if uri.startswith("#") and not link.is_external:
+                    target = uri
+                elif link.is_external:
+                    url = QUrl(uri, QUrl.ParsingMode.StrictMode)
+                    if url.isValid() and url.scheme() in ("http", "https") and url.host():
+                        target = url
+                if target is not None:
+                    links.append((link.rect * page.derotation_matrix, target))
+                link = link.next
+            self.link_page, self.page_links = number, links
+        return next((target for rect, target in self.page_links if rect.contains(point)), None)
+
+    def activate_at(self, position):
+        if self.press_pos is None or self.point_dragged or (position - self.press_pos).manhattanLength() >= QApplication.startDragDistance():
             return
         hit = self.locate(position)
         if not hit:
             return
-        for entry in reversed(self.annotation_hits):
+        for entry in reversed(self.annotations_by_page.get(hit[0], ())):
             boxes = entry.get("marked_boxes") or [entry["rect"]]
-            if entry["page"] == hit[0] and any(fitz.Rect(rect).contains(hit[1]) for rect in boxes):
+            if any(fitz.Rect(rect).contains(hit[1]) for rect in boxes):
                 self.annotationActivated.emit(entry["page"], entry["xref"])
-                break
+                return
+        target = self.link_at(*hit)
+        start = self.locate(self.press_pos)
+        if not target or not start or start[0] != hit[0] or self.link_at(*start) != target:
+            return
+        if isinstance(target, QUrl):
+            if not QDesktopServices.openUrl(target):
+                self.message.emit("无法在系统浏览器中打开此网址。")
+        else:
+            page, x, y = self.document.doc.resolve_link(target)
+            if 0 <= page < self.document.count:
+                self.goto(page, destination=(x, y))
+            else:
+                self.message.emit("文档中的链接目标不可用。")
 
     def contextMenuEvent(self, event):
         if not self.text_boxes:
