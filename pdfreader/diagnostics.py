@@ -5,6 +5,7 @@ No network requests. Writes results only to the directory passed on the CLI.
 from pathlib import Path
 import json
 import os
+import shutil
 import sys
 import time
 import traceback
@@ -74,7 +75,9 @@ def smoke(directory):
                 raise RuntimeError("Smoke test exceeded 40 seconds")
             if stage == 0:
                 stage = 1
-                window.open_file(str(resource_root() / "samples" / "welcome.pdf"))
+                sample = root / "welcome.pdf"
+                shutil.copyfile(resource_root() / "samples" / "welcome.pdf", sample)
+                window.open_file(sample)
                 assert window.document.count == 3
                 assert window.document.scan_candidates() == [1]
                 output["checks"].append("open_sample")
@@ -205,6 +208,8 @@ def smoke(directory):
                 assert window.close_document()
                 assert window.stack.currentWidget() is window.welcome and not window.sessions
                 output["checks"].append("centered_toolbar_and_close_tabs_to_welcome")
+                from .diagnostics_files import exercise_file_protection
+                exercise_file_protection(window, root, output)
                 from .diagnostics_editing import exercise_editing
                 exercise_editing(window,root,output)
                 output["checks"].append("close_and_cleanup")

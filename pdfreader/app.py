@@ -22,6 +22,7 @@ from .dialogs import TextDialog, SignatureDialog, CommentDialog
 from .panels import AIPanel
 from .config import Settings, plugins, validate_plugin
 from .paths import data_root, resource_root, tessdata_path
+from .pdf_files import export_destination
 from .style import STYLE, prepare_fonts
 from .layout import ReaderLayout
 from .documents import DocumentTabs
@@ -659,7 +660,8 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "导出当前页", f"page-{self.view.current_page + 1}.png", "PNG (*.png)")
         if path:
             try:
-                self.document.doc[self.view.current_page].get_pixmap(dpi=180, alpha=False).save(path)
+                with export_destination(path) as output:
+                    self.document.doc[self.view.current_page].get_pixmap(dpi=180, alpha=False).save(output)
                 self.status_label.setText("已导出 PNG：" + path)
             except Exception as exc:
                 self.error(exc)
@@ -669,7 +671,8 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         if path:
             try:
                 content = "\n\n".join(f"--- 第 {n + 1} 页 ---\n{self.document.page_text(n)}" for n in range(self.document.count))
-                Path(path).write_text(content, encoding="utf-8")
+                with export_destination(path) as output:
+                    output.write_text(content, encoding="utf-8")
                 self.status_label.setText("已导出文字：" + path)
             except Exception as exc:
                 self.error(exc)
@@ -998,10 +1001,24 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
 
 
 def run(filenames=None):
+    from .single_instance import ReaderInstance
     app = QApplication.instance() or QApplication(sys.argv[:1])
     file_router = FileOpenRouter(app)
     app.setApplicationName("PDF Reader")
     app.setOrganizationName("PDF Reader")
+    if filenames:
+        file_router.request_open([filenames] if isinstance(filenames, (str, Path)) else filenames)
+    app.processEvents()  # Finder can supply the initial files as QFileOpenEvents.
+    instance = ReaderInstance(data_root(), app)
+    instance.openRequested.connect(file_router.request_open)
+    try:
+        if not instance.start_or_forward(file_router.pending):
+            return 0
+    except RuntimeError as exc:
+        QMessageBox.warning(None, "打开 PDF Reader", str(exc))
+        return 1
+    app.lastWindowClosed.connect(instance.close)
+    app.aboutToQuit.connect(instance.close)
     prepare_fonts(app)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE)
@@ -1009,7 +1026,7 @@ def run(filenames=None):
     window.show()
     file_router.set_window(window)
     QTimer.singleShot(2000, window.check_updates)
-    if filenames:
-        paths = [filenames] if isinstance(filenames, (str, Path)) else filenames
-        QTimer.singleShot(0, lambda: window.open_files(paths))
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        instance.close()

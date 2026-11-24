@@ -1,7 +1,6 @@
 """Document tabs and their independent reading / editing sessions."""
 from dataclasses import dataclass, field
 from pathlib import Path
-import os
 import uuid
 
 from PySide6.QtCore import QTimer, QSize, Qt
@@ -11,7 +10,8 @@ from .engine import PdfDocument, PdfError, PasswordRequired
 from .viewer import PdfView
 from .icons import icon_button
 from .chat_store import document_key
-from .paths import canonical_document_path
+from .paths import same_document_path
+from .pdf_files import FileConflict
 
 
 @dataclass(eq=False)
@@ -189,13 +189,8 @@ class DocumentTabs:
         self.activate_session(session)
         return session
 
-    @staticmethod
-    def path_key(path):
-        return canonical_document_path(path)
-
     def session_for_path(self, path):
-        key = self.path_key(path)
-        return next((s for s in self.sessions if s.document.path and self.path_key(s.document.path) == key), None)
+        return next((s for s in self.sessions if same_document_path(s.document.path, path)), None)
 
     def open_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "打开 PDF", "", "PDF (*.pdf)")
@@ -209,7 +204,7 @@ class DocumentTabs:
         existing = self.session_for_path(path)
         if existing:
             self.activate_session(existing)
-            return True
+            return self.active_session is existing
         document = PdfDocument()
         try:
             password = ""
@@ -306,18 +301,42 @@ class DocumentTabs:
         if not session.view.finish_inline_text(): return False
         document = session.document
         path = document.path
-        if save_as or path is None:
-            chosen, _ = QFileDialog.getSaveFileName(self, "保存 PDF", str(path or session.name), "PDF (*.pdf)")
-            if not chosen:
+        suggested = path or session.name
+        while True:
+            if save_as or path is None:
+                chosen, _ = QFileDialog.getSaveFileName(self, "保存 PDF", str(suggested), "PDF (*.pdf)")
+                if not chosen:
+                    return False
+                path = Path(chosen)
+                if path.suffix.lower() != ".pdf":
+                    path = Path(str(path) + ".pdf")
+                    if path.exists() and QMessageBox.question(self, "替换已有 PDF", f"“{path.name}”已存在，要替换它吗？",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                            QMessageBox.StandardButton.Cancel) != QMessageBox.StandardButton.Yes:
+                        return False
+            try:
+                other = self.session_for_path(path)
+                if other and other is not session:
+                    raise PdfError("该文件已在另一个标签中打开，请选择其他文件名。")
+                document.save(path)
+                break
+            except FileConflict as exc:
+                dialog = QMessageBox(QMessageBox.Icon.Warning, "保存冲突", f"{exc}\n当前编辑已保留，可以另存为副本。",
+                                     QMessageBox.StandardButton.Cancel, self)
+                copy_button = dialog.addButton("另存副本…", QMessageBox.ButtonRole.AcceptRole)
+                dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+                dialog.setEscapeButton(QMessageBox.StandardButton.Cancel)
+                dialog.exec()
+                save_copy = dialog.clickedButton() is copy_button
+                dialog.deleteLater()
+                if not save_copy:
+                    return False
+                suggested = path.with_name(path.stem + " - 副本.pdf")
+                save_as = True
+            except Exception as exc:
+                self.error(exc)
                 return False
-            path = Path(chosen)
-            if path.suffix.lower() != ".pdf":
-                path = path.with_suffix(".pdf")
         try:
-            other = self.session_for_path(path)
-            if other and other is not session:
-                raise PdfError("该文件已在另一个标签中打开，请选择其他文件名。")
-            document.save(path)
             if session is self.active_session:
                 self.ai.rebind_document(document.path, session.name)
                 session.ai_state = self.ai.snapshot()

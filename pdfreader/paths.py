@@ -32,16 +32,31 @@ def tessdata_path() -> Path:
     return resource_root() / "assets" / "tessdata"
 
 
-def canonical_document_path(value):
+def canonical_document_path(value, *, case_probe=None):
     path = Path(value).resolve()
     if sys.platform == "darwin":
-        # APFS may be case-sensitive or case-insensitive. Fold only when this
-        # existing file proves both spellings refer to the same filesystem entry.
-        alternate = path.with_name(path.name.swapcase())
+        # A staged sibling can prove the destination directory's case behavior
+        # before the target exists. This also keeps its lock key stable on rename.
+        probe = case_probe or path
+        alternate = probe.with_name(probe.name.swapcase())
         try:
-            if alternate.name != path.name and path.samefile(alternate):
+            if alternate.name != probe.name and probe.stat().st_ino and probe.samefile(alternate):
                 import unicodedata
                 return unicodedata.normalize("NFC", str(path)).casefold()
         except OSError:
             pass
     return os.path.normcase(str(path))
+
+
+def same_document_path(first, second):
+    if first is None or second is None:
+        return False
+    if canonical_document_path(first) == canonical_document_path(second):
+        return True
+    try:
+        identity = Path(first).stat()
+        # Some virtual drives report zero for every file ID. Their different
+        # filenames must remain independent documents.
+        return bool(identity.st_ino and os.path.samestat(identity, Path(second).stat()))
+    except OSError:
+        return False

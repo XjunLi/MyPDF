@@ -3,6 +3,7 @@ import gc
 import json
 import os
 from pathlib import Path
+import shutil
 import statistics
 import sys
 import time
@@ -69,7 +70,9 @@ def performance(directory,filename=None):
     app=QApplication.instance() or QApplication([])
     prepare_fonts(app); app.setStyle("Fusion"); app.setStyleSheet(STYLE)
     window=MainWindow(); window.auto_ocr.setChecked(False); window.show()
-    window.open_file(filename or resource_root()/"samples/welcome.pdf")
+    sample = root / "benchmark-input.pdf"
+    shutil.copyfile(filename or resource_root()/"samples/welcome.pdf", sample)
+    assert window.open_file(sample)
     def settle():
         app.processEvents(); QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete); app.processEvents()
     def cycles(count):

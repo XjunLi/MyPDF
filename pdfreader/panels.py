@@ -21,6 +21,7 @@ from .chat_store import ChatStore, document_key
 from .ai_context import background_message, document_mode
 from .dialogs import AISettingsDialog
 from .icons import icon, icon_button
+from .pdf_files import export_destination
 
 
 class ModelLabel(QLabel):
@@ -600,7 +601,8 @@ class AIPanel(QWidget):
                 destination = Path(path)
                 if destination.suffix.lower() != ".md":
                     destination = destination.with_suffix(".md")
-                destination.write_text(text if isinstance(text, str) else self.export_markdown(), encoding="utf-8")
+                with export_destination(destination) as output:
+                    output.write_text(text if isinstance(text, str) else self.export_markdown(), encoding="utf-8")
                 return True
             except Exception as exc:
                 QMessageBox.warning(self, "导出失败", str(exc))

@@ -279,6 +279,47 @@ def test_reopening_same_path_focuses_existing_unsaved_tab(reader, pdf_path, tmp_
     assert len(reader.sessions) == 2
 
 
+def test_hard_link_reuses_draft_and_same_name_in_another_folder_is_independent(reader, pdf_path, tmp_path):
+    first = reader.active_session
+    reader.mutate(lambda: reader.document.add_comment(0, (90, 90), "keep draft"))
+    alias = tmp_path / "paper alias.pdf"
+    alias.hardlink_to(pdf_path)
+    distinct = another_pdf(pdf_path, tmp_path, "other/source.pdf")
+    assert reader.open_file(distinct) and reader.active_session is not first
+    assert reader.open_file(alias) and reader.active_session is first
+    assert reader.document.dirty and len(reader.sessions) == 2
+    assert reader.document.annotations()[0]["text"] == "keep draft"
+
+
+def test_save_conflict_on_close_preserves_draft_and_can_save_a_copy(reader, pdf_path, tmp_path, monkeypatch):
+    reader.mutate(lambda: reader.document.add_comment(0, (90, 90), "my note"))
+    external = pdf_path.read_bytes() + b"\n% changed externally\n"
+    pdf_path.write_bytes(external)
+    buttons = QMessageBox.StandardButton
+    save_copy = False
+    def pick_button(dialog):
+        assert dialog.windowTitle() == "保存冲突" and dialog.defaultButton() == dialog.button(buttons.Cancel)
+        copy = next(button for button in dialog.buttons() if button.text() == "另存副本…")
+        (copy if save_copy else dialog.button(buttons.Cancel)).click()
+        return 0
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: buttons.Save)
+    monkeypatch.setattr(QMessageBox, "exec", pick_button)
+    assert not reader.close_document()
+    assert reader.document.dirty and reader.document.path == pdf_path
+    save_copy = True
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: ("", ""))
+    assert not reader.save() and reader.document.dirty
+    def choose_copy(parent, title, suggested, filters):
+        assert Path(suggested) == tmp_path / "source - 副本.pdf"
+        return str(tmp_path / "my notes.v2"), "PDF"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose_copy)
+    assert reader.save() and not reader.document.dirty
+    assert reader.document.path == tmp_path / "my notes.v2.pdf" and pdf_path.read_bytes() == external
+    with fitz.open(reader.document.path) as saved:
+        page = saved[0]
+        assert next(page.annots()).info["content"] == "my note"
+
+
 def test_failed_or_cancelled_open_keeps_current_document(reader, tmp_path, monkeypatch):
     active = reader.active_session
     errors = []

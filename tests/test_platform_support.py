@@ -2,7 +2,7 @@ import base64
 import sys
 from pathlib import Path
 import pytest
-from PySide6.QtCore import QEvent, QUrl
+from PySide6.QtCore import QEvent, Qt, QUrl
 from pdfreader import privacy, paths
 from pdfreader.application import FileOpenRouter, shortcut_text
 
@@ -89,7 +89,7 @@ def test_finder_open_queues_before_window_and_opens_later(qapp, pdf_path):
     class Window:
         def __init__(self): self.opened = []
         def open_files(self, files): self.opened.extend(files)
-        def showNormal(self): pass
+        def windowState(self): return Qt.WindowState.WindowMaximized
         def raise_(self): pass
         def activateWindow(self): pass
     assert qapp.sendEvent(qapp, OpenEvent(str(pdf_path)))

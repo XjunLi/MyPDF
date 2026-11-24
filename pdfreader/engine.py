@@ -9,16 +9,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import BinaryIO
 import os
+import hashlib
 import math
 import tempfile
 import uuid
 
 import pymupdf as fitz
 from .text_edit import capture_region, replacement_plan, write_replacement, TextEditError
-
-
-class PdfError(Exception):
-    pass
+from .paths import same_document_path
+from .pdf_files import PdfError, OpenFileLease, file_digest, write_pdf
 
 
 class PasswordRequired(PdfError):
@@ -41,6 +40,8 @@ class PdfDocument:
     def __init__(self):
         self.doc = None
         self.path = None
+        self._lease = None
+        self._saved_digest = None
         self.password = ""
         self.state = ""
         self.saved_state = ""
@@ -69,9 +70,18 @@ class PdfDocument:
 
     def open(self, path, password=""):
         path = Path(path).resolve()
-        document = self._load(path.read_bytes(), password)
+        with path.open("rb") as stream:
+            lease = OpenFileLease.acquire(path, os.fstat(stream.fileno()), self._lease)
+            try:
+                data = stream.read()
+                digest = hashlib.sha256(data).digest()
+                document = self._load(data, password)
+            except BaseException:
+                lease.release(self._lease)
+                raise
         if self.doc is not None:
             self.doc.close()
+        self._bind_file(lease, digest)
         self.doc = document
         self.path = path
         self.password = password
@@ -80,11 +90,18 @@ class PdfDocument:
         self.revision += 1
         self._clear_history()
 
+    def _bind_file(self, lease, digest):
+        if self._lease is not None:
+            self._lease.release(lease)
+        self._lease = lease
+        self._saved_digest = digest
+
     def new(self):
         if self.doc is not None:
             self.doc.close()
         self.doc = fitz.open()
         self.doc.new_page()
+        self._bind_file(None, None)
         self.path = None
         self.password = ""
         self.state = uuid.uuid4().hex
@@ -191,22 +208,9 @@ class PdfDocument:
         target = Path(destination or self.path or "").resolve()
         if target.is_dir():
             raise PdfError("请选择 PDF 文件名。")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Write and verify a sibling temporary file before atomically replacing.
-        fd, temp = tempfile.mkstemp(prefix=".pdfreader-", suffix=".pdf", dir=target.parent)
-        os.close(fd)
-        try:
-            self.doc.save(temp, garbage=3, deflate=True, encryption=fitz.PDF_ENCRYPT_KEEP)
-            check = self._load(Path(temp).read_bytes())
-            if len(check) != self.count:
-                raise PdfError("保存验证失败，原文件未被替换。")
-            check.close()
-            with open(temp, "r+b") as stream:
-                os.fsync(stream.fileno())
-            os.replace(temp, target)
-        finally:
-            if os.path.exists(temp):
-                os.unlink(temp)
+        expected = self._saved_digest if same_document_path(self.path, target) else file_digest(target)
+        digest, lease = write_pdf(self.doc, target, expected, owner=self._lease, keep_open=True, password=self.password)
+        self._bind_file(lease, digest)
         self.path = target
         self.saved_state = self.state
 
@@ -524,13 +528,15 @@ class PdfDocument:
             other.close()
 
     def export_pages(self, pages, destination):
-        if self.path and Path(destination).resolve() == self.path:
+        target = Path(destination).resolve()
+        if same_document_path(target, self.path):
             raise PdfError("导出页面请使用新文件名，不能覆盖当前文档。")
+        expected = file_digest(target)
         result = fitz.open()
         try:
             for p in pages:
                 result.insert_pdf(self.doc, from_page=p, to_page=p)
-            result.save(destination, garbage=3, deflate=True)
+            write_pdf(result, target, expected)
         finally:
             result.close()
 
@@ -561,6 +567,7 @@ class PdfDocument:
         if self.doc is not None:
             self.doc.close()
             self.doc = None
+        self._bind_file(None, None)
         self._clear_history()
         self.password=""
 
