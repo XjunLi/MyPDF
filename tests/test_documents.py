@@ -298,7 +298,9 @@ def test_save_conflict_on_close_preserves_draft_and_can_save_a_copy(reader, pdf_
     buttons = QMessageBox.StandardButton
     save_copy = False
     def pick_button(dialog):
-        assert dialog.windowTitle() == "保存冲突" and dialog.defaultButton() == dialog.button(buttons.Cancel)
+        # macOS sheets omit the window title. Check what the user can read and choose.
+        assert pdf_path.name in dialog.text() and "当前编辑已保留" in dialog.text()
+        assert dialog.defaultButton() == dialog.button(buttons.Cancel)
         copy = next(button for button in dialog.buttons() if button.text() == "另存副本…")
         (copy if save_copy else dialog.button(buttons.Cancel)).click()
         return 0
