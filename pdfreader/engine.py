@@ -16,8 +16,8 @@ import uuid
 
 import pymupdf as fitz
 from .text_edit import capture_region, replacement_plan, write_replacement, TextEditError
-from .paths import same_document_path
-from .pdf_files import PdfError, OpenFileLease, file_digest, write_pdf
+from .paths import canonical_document_path, same_document_path
+from .pdf_files import PdfError, OpenFileLease, file_digest, verified_file, write_pdf
 
 
 class PasswordRequired(PdfError):
@@ -95,6 +95,32 @@ class PdfDocument:
             self._lease.release(lease)
         self._lease = lease
         self._saved_digest = digest
+
+    def owns_file(self, path):
+        if self._lease is None:
+            return False
+        try:
+            return self._lease.owns_identity(Path(path).stat())
+        except OSError:
+            return False
+
+    def matches_file(self, path):
+        return self.path is not None and (canonical_document_path(self.path) == canonical_document_path(path)
+                                          or self.owns_file(path))
+
+    def follow_rename(self, path):
+        target = Path(path).resolve()
+        if self.path == target or self.owns_file(self.path):
+            return False
+        stat = target.stat()
+        if not self._lease.owns_identity(stat):
+            return False
+        # Retain the digest of the opened revision. A sync edit made while
+        # renaming must still trigger a conflict on the next save.
+        lease = OpenFileLease.acquire(target, stat, self._lease)
+        self._bind_file(lease, self._saved_digest)
+        self.path = target
+        return True
 
     def new(self):
         if self.doc is not None:
@@ -208,8 +234,18 @@ class PdfDocument:
         target = Path(destination or self.path or "").resolve()
         if target.is_dir():
             raise PdfError("请选择 PDF 文件名。")
-        expected = self._saved_digest if same_document_path(self.path, target) else file_digest(target)
-        digest, lease = write_pdf(self.doc, target, expected, owner=self._lease, keep_open=True, password=self.password)
+        # Every editor operation records a history state. MuPDF keeps its own
+        # dirty flag set even after successfully saving a stream-backed PDF.
+        clean = self.path is not None and not self.dirty
+        if clean and (target == self.path or self.owns_file(target)):
+            lease = verified_file(target, self._saved_digest, self._lease)
+            self._bind_file(lease, self._saved_digest)
+            self.path = target
+            return
+        expected = self._saved_digest if self.matches_file(target) else file_digest(target)
+        clean_source = (self.path, self._saved_digest) if clean and self.path else None
+        digest, lease = write_pdf(self.doc, target, expected, owner=self._lease, keep_open=True,
+                                  password=self.password, clean_source=clean_source)
         self._bind_file(lease, digest)
         self.path = target
         self.saved_state = self.state

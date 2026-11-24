@@ -2,11 +2,26 @@
 from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 
 def shortcut_text(shortcut):
     return QKeySequence(shortcut).toString(QKeySequence.SequenceFormat.NativeText)
+
+
+def choose_output_file(parent, title, suggested, file_filter, suffix):
+    chosen, _ = QFileDialog.getSaveFileName(parent, title, str(suggested), file_filter)
+    if not chosen:
+        return None
+    target = Path(chosen)
+    if target.suffix.lower() != suffix:
+        target = Path(chosen + suffix)
+        # The native overwrite prompt applies to the name the user entered.
+        if target.exists() and QMessageBox.question(parent, "替换已有文件", f"“{target.name}”已存在，要替换它吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel) != QMessageBox.StandardButton.Yes:
+            return None
+    return target
 
 
 class FileOpenRouter(QObject):
@@ -23,6 +38,7 @@ class FileOpenRouter(QObject):
 
     def set_window(self, window):
         self.window = window
+        window.file_open_router = self
         if self.activation_requested:
             self.timer.start(0)
 

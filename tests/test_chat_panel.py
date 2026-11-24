@@ -255,6 +255,53 @@ def test_global_history_opens_the_correct_pdf_and_keeps_current_draft(reader, pd
     assert ai.input.toPlainText() == "Second unsent draft"
 
 
+def test_cancelling_service_preset_preserves_existing_settings(reader, monkeypatch):
+    from pdfreader.dialogs import AISettingsDialog
+    original = dict(reader.settings.values["ai"])
+    def reject(dialog):
+        assert dialog.values()["model"] == "preset-example" and not dialog.values()["key"]
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(AISettingsDialog, "exec", reject)
+    reader.apply_ai_plugin({"endpoint":"http://localhost:11434/v1", "model":"preset-example"})
+    assert reader.settings.values["ai"] == original
+
+
+def test_attachment_uses_the_visible_revision_and_never_sends_an_invalid_draft(reader):
+    ai = reader.ai
+    reader.settings.values["ai"]["document_mode"] = "text"
+    ai.set_attachment(3)
+    before = ai.get_document_context()["source_state"]
+    reader.view.begin_inline_text(0, (90, 550))
+    editor = reader.view.inline_editor
+    editor.input.setPlainText("overflowing draft " * 100)
+    ai.input.setPlainText("Read this page")
+    try:
+        ai.send()
+        assert not ai.job and reader.view.inline_editor is editor and ai.input.toPlainText() == "Read this page"
+        editor.input.setPlainText("Visible note")
+        ai.send()
+        assert ai.job and ai.document_context["source_state"] != before
+        assert "Visible note" in ai.document_context["data"]
+    finally:
+        reader.view.finish_inline_text(cancel=True)
+        ai.cancel()
+
+
+def test_repeated_previews_and_plugin_refresh_release_owned_widgets(reader, qapp, monkeypatch):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    monkeypatch.setattr("pdfreader.app.plugins", lambda: [{"kind":"ai", "name":"Local", "model":"example",
+                                                        "endpoint":"http://localhost:11434/v1"}])
+    action_count = len(reader.actions())
+    dialog_count = len(reader.ai.findChildren(QDialog))
+    for _ in range(6):
+        reader.update_plugins()
+        QTimer.singleShot(0, lambda: qapp.activeModalWidget().reject())
+        reader.ai.preview_attachment({"text": "sample excerpt"})
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert len(reader.actions()) == action_count and len(reader.plugin_menu.actions()) == 1
+    assert len(reader.ai.findChildren(QDialog)) == dialog_count
+
+
 def test_unsaved_document_history_remains_accessible_as_archive(reader, monkeypatch):
     reader.new_document()
     ai = reader.ai

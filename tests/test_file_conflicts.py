@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,65 @@ import pytest
 
 from pdfreader.engine import PasswordRequired, PdfDocument
 from pdfreader.pdf_files import FileConflict, PdfError, export_destination
+
+
+def test_clean_save_keeps_bytes_timestamp_links_and_clean_save_as_is_exact(document, pdf_path, tmp_path):
+    alias = tmp_path / "alias.pdf"
+    alias.hardlink_to(pdf_path)
+    before, stamp = pdf_path.read_bytes(), pdf_path.stat()
+    document.save()
+    assert pdf_path.read_bytes() == before and pdf_path.stat().st_mtime_ns == stamp.st_mtime_ns
+    assert alias.samefile(pdf_path)
+    copied = tmp_path / "copy.pdf"
+    document.save(copied)
+    assert copied.read_bytes() == before and document.path == copied
+    copied.write_bytes(before + b"\n% incoming revision\n")
+    with pytest.raises(FileConflict):
+        document.save()
+    assert copied.read_bytes().endswith(b"incoming revision\n")
+    document.save(tmp_path / "recovered.pdf")
+    assert (tmp_path / "recovered.pdf").read_bytes() == before
+
+
+def test_new_filename_claimed_after_final_check_keeps_other_writers_file(document, tmp_path, monkeypatch):
+    from pdfreader import pdf_files
+    path = tmp_path / "incoming.pdf"
+    verify = pdf_files.checked_destination
+    @contextmanager
+    def insert_after_check(*args, **kwargs):
+        with verify(*args, **kwargs):
+            path.write_bytes(b"other writer")
+            yield
+    monkeypatch.setattr(pdf_files, "checked_destination", insert_after_check)
+    document.add_comment(0, (60, 70), "draft is safe")
+    with pytest.raises(FileConflict):
+        document.save(path)
+    assert path.read_bytes() == b"other writer" and document.dirty and document.path != path
+    assert not list(tmp_path.glob(".pdfreader-*"))
+
+
+def test_save_conflict_and_save_as_keep_live_annotation_ids_and_exact_saved_copy(document, pdf_path, tmp_path):
+    document.add_comment(0, (40, 40), "remove first")
+    document.add_comment(0, (80, 80), "keep second")
+    first, second = document.annotations()
+    document.delete_annotation(0, first["xref"])
+    external = pdf_path.read_bytes() + b"\n% changed outside\n"
+    pdf_path.write_bytes(external)
+    with pytest.raises(FileConflict):
+        document.save()
+    assert document.annotations()[0]["xref"] == second["xref"]
+    edited = tmp_path / "my edits.pdf"
+    document.save(edited)
+    document.edit_comment(0, second["xref"], "edited through the original sidebar entry")
+    document.save()
+    stamp = edited.stat()
+    document.save()
+    assert edited.stat().st_mtime_ns == stamp.st_mtime_ns and edited.stat().st_ino == stamp.st_ino
+    copy = tmp_path / "copy of saved edits.pdf"
+    document.save(copy)
+    assert copy.read_bytes() == edited.read_bytes() and edited.read_bytes() != external
+    assert document.annotations()[0]["text"] == "edited through the original sidebar entry"
+    assert pdf_path.read_bytes() == external
 
 
 def test_distinct_virtual_drive_paths_with_no_file_ids_stay_independent(monkeypatch):

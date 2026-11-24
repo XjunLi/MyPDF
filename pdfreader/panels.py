@@ -10,16 +10,16 @@ import time
 from PySide6.QtCore import Qt, Signal, QTimer, QObject, Slot
 from PySide6.QtGui import QActionGroup, QKeySequence, QPixmap, QShortcut, QCursor
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPlainTextEdit, QMessageBox, QFrame, QMenu, QToolButton, QDialog,
-    QDialogButtonBox, QFileDialog, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QTabWidget,
+    QLabel, QPlainTextEdit, QMessageBox, QFrame, QMenu, QToolButton,
+    QDialogButtonBox, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QTabWidget,
     QSizePolicy, QStyle, QStyleOptionToolButton, QStylePainter)
 
 from .ai import AIJob, validate_endpoint, history_for_request
-from .application import shortcut_text
+from .application import shortcut_text, choose_output_file
 from .chat_markdown import ChatView, markdown_html
 from .chat_store import ChatStore, document_key
 from .ai_context import background_message, document_mode
-from .dialogs import AISettingsDialog
+from .dialogs import AISettingsDialog, DisposableDialog
 from .icons import icon, icon_button
 from .pdf_files import export_destination
 
@@ -79,11 +79,12 @@ class AIPanel(QWidget):
     historyOpenRequested = Signal(str, dict)
 
     def __init__(self, settings, context_provider, parent=None, image_provider=None,
-                 document_provider=None, document_info=None, preparation_provider=None):
+                 document_provider=None, document_info=None, preparation_provider=None, finish_edit=None):
         super().__init__(parent)
         self.settings, self.context_provider = settings, context_provider
         self.image_provider = image_provider
         self.preparation_provider = preparation_provider
+        self.finish_edit = finish_edit
         self.preparation = None
         self.phase, self.started_at, self.continue_from = "", 0, ""
         self.document_provider = document_provider
@@ -213,13 +214,18 @@ class AIPanel(QWidget):
         self.update_preview()
         self.update_storage_status()
 
-    def configure(self):
-        dialog = AISettingsDialog(self, self.settings.values.get("ai", {}))
+    def configure(self, preset=None):
+        dialog = AISettingsDialog(self, preset if isinstance(preset, dict) else self.settings.values.get("ai", {}))
         if dialog.exec():
             previous = self.settings.values.get("ai", {})
             try:
                 values = dialog.values()
                 validate_endpoint(values["endpoint"])
+                if (not preset and "key" not in previous and previous.get("protected_key")
+                        and values.get("remember_key") and not values.get("key")
+                        and values["endpoint"] == previous.get("endpoint")):
+                    values.pop("key", None)
+                    values["protected_key"] = previous["protected_key"]
                 self.settings.values["ai"] = values
                 self.settings.save()
                 self.update_connection()
@@ -261,9 +267,11 @@ class AIPanel(QWidget):
         self.remove_attachment.setVisible(bool(kind))
 
     def preview_attachment(self, record=None):
+        if not isinstance(record, dict) and self.attachment_kind and self.finish_edit and not self.finish_edit():
+            return
         if (isinstance(record, dict) and record.get("kind") == "smart") or (not isinstance(record, dict) and self.attachment_kind == 3):
             return self.preview_smart_attachment(record if isinstance(record, dict) else None)
-        dialog = QDialog(self)
+        dialog = DisposableDialog(self)
         dialog.setWindowTitle("本次附件预览")
         dialog.resize(540, 650)
         layout = QVBoxLayout(dialog)
@@ -276,6 +284,7 @@ class AIPanel(QWidget):
             elif archived or self.attachment_kind == 2:
                 attachment = archived or (self.image_provider() if self.image_provider else None)
                 if not attachment:
+                    dialog.deleteLater()
                     return
                 image = QPixmap()
                 image.loadFromData(attachment["png"])
@@ -289,8 +298,10 @@ class AIPanel(QWidget):
                 layout.addWidget(label, 1)
                 layout.addWidget(QLabel(attachment["label"]))
             else:
+                dialog.deleteLater()
                 return
         except Exception:
+            dialog.deleteLater()
             QMessageBox.warning(self, "无法预览", "未能生成当前页截图，请重新打开该 PDF 后重试。")
             return
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -319,7 +330,7 @@ class AIPanel(QWidget):
                           "png": image["png"] if image else b"", "selection": self.context_provider(1),
                           "background_text": "整份 PDF 将在本机转换为逐页文字与图片，保留公式和图表。点击发送才开始转换和请求服务。" if mode == "pages" else "",
                           "mode": mode}
-            dialog = QDialog(self)
+            dialog = DisposableDialog(self)
             dialog.setWindowTitle("发送内容预览")
             dialog.resize(550, 650)
             layout = QVBoxLayout(dialog)
@@ -475,7 +486,7 @@ class AIPanel(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "无法读取历史", str(exc))
             return
-        dialog = QDialog(self)
+        dialog = DisposableDialog(self)
         dialog.setWindowTitle("历史对话")
         dialog.resize(500, 450)
         layout = QVBoxLayout(dialog)
@@ -528,7 +539,7 @@ class AIPanel(QWidget):
 
     def view_archive(self, state, record):
         # Even an unsaved or moved PDF must not make its chat inaccessible.
-        dialog = QDialog(self)
+        dialog = DisposableDialog(self)
         dialog.setWindowTitle("已归档对话 · " + record["document"])
         dialog.resize(600, 650)
         layout = QVBoxLayout(dialog)
@@ -595,12 +606,9 @@ class AIPanel(QWidget):
         return "\n\n".join(parts) + "\n"
 
     def export_chat(self, text=None):
-        path, _ = QFileDialog.getSaveFileName(self, "导出对话（普通 Markdown 文件）", "AI 对话.md", "Markdown (*.md)")
-        if path:
+        destination = choose_output_file(self, "导出对话（普通 Markdown 文件）", "AI 对话.md", "Markdown (*.md)", ".md")
+        if destination:
             try:
-                destination = Path(path)
-                if destination.suffix.lower() != ".md":
-                    destination = destination.with_suffix(".md")
                 with export_destination(destination) as output:
                     output.write_text(text if isinstance(text, str) else self.export_markdown(), encoding="utf-8")
                 return True
@@ -636,6 +644,7 @@ class AIPanel(QWidget):
             menu = QMenu(self)
             menu.addAction("复制链接", lambda: QApplication.clipboard().setText(url.toString()))
             menu.exec(QCursor.pos())
+            menu.deleteLater()
 
     def render(self, force_bottom=False):
         bar = self.chat.verticalScrollBar()
@@ -671,6 +680,8 @@ class AIPanel(QWidget):
             self.configure()
             return
         kind = self.attachment_kind
+        if kind and self.finish_edit and not self.finish_edit():
+            return
         selection = self.context_provider(1) if kind in (1, 3) else ""
         if kind == 1 and not selection:
             QMessageBox.information(self, "没有选中文字", "先在 PDF 中拖动选中文字，或通过 ＋ 选择不附加信息。")
@@ -908,4 +919,6 @@ class AIPanel(QWidget):
         keep = dialog.addButton("返回", QMessageBox.ButtonRole.RejectRole)
         dialog.setDefaultButton(keep)
         dialog.exec()
-        return dialog.clickedButton() is leave
+        confirmed = dialog.clickedButton() is leave
+        dialog.deleteLater()
+        return confirmed

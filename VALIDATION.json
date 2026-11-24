@@ -1,11 +1,11 @@
 {
-  "version": "0.8.4",
+  "version": "0.8.5",
   "date": "2026-11-24",
   "local_windows_tests": {
-    "passed": 231,
+    "passed": 246,
     "skipped": 1
   },
-  "smoke_check_count": 35,
+  "smoke_check_count": 39,
   "performance_test": {
     "editor_cycles": 48,
     "signature_dialog_cycles": 10,

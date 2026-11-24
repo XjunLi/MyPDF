@@ -291,6 +291,77 @@ def test_hard_link_reuses_draft_and_same_name_in_another_folder_is_independent(r
     assert reader.document.annotations()[0]["text"] == "keep draft"
 
 
+def test_reopen_after_external_rename_follows_original_draft(reader, pdf_path, tmp_path, monkeypatch):
+    session = reader.active_session
+    reader.mutate(lambda: reader.document.add_comment(0, (64, 70), "draft before rename"))
+    reader.ai.input.setPlainText("chat for original")
+    renamed = tmp_path / "renamed by user.pdf"
+    pdf_path.rename(renamed)
+    reader.open_file(another_pdf(renamed, tmp_path, "separate.pdf"))
+    errors = []
+    monkeypatch.setattr(reader, "error", lambda e: errors.append(str(e)))
+    assert reader.open_file(renamed)
+    assert not errors and reader.active_session is session and len(reader.sessions) == 2
+    assert reader.document.path == renamed and reader.ai.input.toPlainText() == "chat for original"
+    assert reader.save() and not pdf_path.exists()
+    with fitz.open(renamed) as doc:
+        page = doc[0]
+        assert next(page.annots()).info["content"] == "draft before rename"
+
+
+def test_invalid_inline_draft_never_opens_a_ghost_tab_or_crosses_history(reader, pdf_path, tmp_path, monkeypatch):
+    from pdfreader.chat_store import document_key
+    second = another_pdf(pdf_path, tmp_path)
+    first = reader.active_session
+    reader.ai.input.setPlainText("belongs to first")
+    reader.view.begin_inline_text(0, (90, 550))
+    editor = reader.view.inline_editor
+    editor.input.setPlainText("text beyond page " * 100)
+    try:
+        assert not reader.open_file(second)
+        reader.new_document()
+        reader.open_ai_history(second, {"input": "belongs to second", "document_key": document_key(second)})
+        assert reader.sessions == [first] and reader.document_tabs.count() == 1
+        assert reader.view.inline_editor is editor and reader.ai.input.toPlainText() == "belongs to first"
+        assert reader.document.path == pdf_path
+        from pdfreader.engine import PdfDocument
+        other = PdfDocument()
+        other.open(second)
+        other.close()
+    finally:
+        reader.view.finish_inline_text(cancel=True)
+    assert reader.open_file(second)
+
+
+def test_export_rejects_invalid_inline_draft_then_includes_valid_text(reader, tmp_path, monkeypatch):
+    reader.view.begin_inline_text(0, (90, 550))
+    editor = reader.view.inline_editor
+    editor.input.setPlainText("long line " * 150)
+    dest = tmp_path / "visible.txt"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(dest), ""))
+    try:
+        reader.export_text()
+        assert not dest.exists() and reader.view.inline_editor is editor
+        editor.input.setPlainText("Visible edit")
+        reader.export_text()
+        assert "Visible edit" in dest.read_text(encoding="utf-8") and reader.view.inline_editor is None
+    finally:
+        reader.view.finish_inline_text(cancel=True)
+
+
+def test_markdown_export_never_overwrites_a_different_basename(reader, tmp_path, monkeypatch):
+    old = tmp_path / "notes.md"
+    old.write_text("old notes", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(tmp_path / "notes.v2"), ""))
+    assert reader.ai.export_chat("new notes")
+    assert old.read_text(encoding="utf-8") == "old notes"
+    dest = tmp_path / "notes.v2.md"
+    assert dest.read_text(encoding="utf-8") == "new notes"
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+    assert not reader.ai.export_chat("cancelled overwrite")
+    assert dest.read_text(encoding="utf-8") == "new notes"
+
+
 def test_save_conflict_on_close_preserves_draft_and_can_save_a_copy(reader, pdf_path, tmp_path, monkeypatch):
     reader.mutate(lambda: reader.document.add_comment(0, (90, 90), "my note"))
     external = pdf_path.read_bytes() + b"\n% changed externally\n"
@@ -320,6 +391,43 @@ def test_save_conflict_on_close_preserves_draft_and_can_save_a_copy(reader, pdf_
     with fitz.open(reader.document.path) as saved:
         page = saved[0]
         assert next(page.annots()).info["content"] == "my note"
+
+
+def test_file_open_received_during_quit_confirmation_is_delivered(reader, pdf_path, tmp_path, qapp, qt_wait):
+    from PySide6.QtCore import QTimer
+    from pdfreader.application import FileOpenRouter
+    router = FileOpenRouter(qapp)
+    router.set_window(reader)
+    other = another_pdf(pdf_path, tmp_path)
+    reader.mutate(lambda: reader.document.add_comment(0, (74, 80), "save before quit"))
+    def while_confirming():
+        box = qapp.activeModalWidget()
+        router.request_open([str(other)])
+        router.drain()
+        box.button(QMessageBox.StandardButton.Save).click()
+    QTimer.singleShot(0, while_confirming)
+    try:
+        assert not reader.close()
+        qt_wait(lambda: reader.document.path == other and reader.isVisible())
+        with fitz.open(pdf_path) as saved:
+            page = saved[0]
+            assert next(page.annots()).info["content"] == "save before quit"
+    finally:
+        router.timer.stop()
+        qapp.removeEventFilter(router)
+        router.deleteLater()
+
+
+def test_standalone_chat_draft_survives_switch_when_database_is_unavailable(reader, pdf_path, monkeypatch):
+    assert reader.close_document()
+    ai = reader.ai
+    ai.input.setPlainText("standalone unsent draft")
+    with monkeypatch.context() as m:
+        m.setattr(ai, "persist_state", lambda state: False)
+        assert reader.open_file(pdf_path)
+    assert ai.input.toPlainText() == ""
+    assert reader.close_document()
+    assert ai.input.toPlainText() == "standalone unsent draft"
 
 
 def test_failed_or_cancelled_open_keeps_current_document(reader, tmp_path, monkeypatch):

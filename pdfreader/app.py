@@ -18,7 +18,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from . import __version__, updates
 from .engine import PdfDocument, PdfError, PasswordRequired, parse_page_range
 from .viewer import PdfView
-from .dialogs import TextDialog, SignatureDialog, CommentDialog
+from .dialogs import TextDialog, SignatureDialog, CommentDialog, DisposableDialog
 from .panels import AIPanel
 from .config import Settings, plugins, validate_plugin
 from .paths import data_root, resource_root, tessdata_path
@@ -26,7 +26,7 @@ from .pdf_files import export_destination
 from .style import STYLE, prepare_fonts
 from .layout import ReaderLayout
 from .documents import DocumentTabs
-from .application import FileOpenRouter
+from .application import FileOpenRouter, choose_output_file
 
 
 class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
@@ -35,6 +35,8 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.document = PdfDocument()
         self.sessions = []
         self.active_session = None
+        self.general_ai_state = {}
+        self.file_open_router = None
         self.untitled_sequence = 0
         self.settings = Settings()
         self.selection_text = ""
@@ -44,6 +46,10 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.ocr_state = None
         self.ocr_cancelled = False
         self.ocr_pending_open = None
+        self.auto_ocr_timer = QTimer(self)
+        self.auto_ocr_timer.setSingleShot(True)
+        self.auto_ocr_timer.setInterval(450)
+        self.auto_ocr_timer.timeout.connect(lambda: self.start_ocr(automatic=True) if self.auto_ocr.isChecked() else None)
         self.search_results = []
         self.search_index = -1
         self.edit_actions = []
@@ -320,8 +326,8 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         if not self.document.count:
             return False
         if not preserve_draft and not self.view.finish_inline_text(): return False
-        resume_ocr = (self.ocr_process is not None and self.auto_ocr.isChecked()
-                      and (not self.ocr_cancelled or self.ocr_pending_open == self.document_epoch))
+        resume_ocr = self.auto_ocr.isChecked() and (self.auto_ocr_timer.isActive()
+                      or (self.ocr_process is not None and (not self.ocr_cancelled or self.ocr_pending_open == self.document_epoch)))
         self.cancel_ocr()
         revision = self.document.revision
         try:
@@ -342,7 +348,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 if self.ocr_process is not None:
                     self.ocr_pending_open = self.document_epoch
                 else:
-                    self.start_ocr(automatic=True)
+                    self.schedule_auto_ocr()
 
     def undo(self):
         self.mutate(self.document.undo)
@@ -455,7 +461,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             mode="edit" if "region" in payload else "select"
             self.view.set_mode(mode)
             self.mode_actions[mode].setChecked(True)
-            self.schedule_auto_ocr()
 
     def open_font_library(self):
         from .font_library import FontLibraryDialog
@@ -644,12 +649,14 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 self.error(exc)
 
     def export_pages(self):
+        if not self.view.finish_inline_text():
+            return
         value, ok = QInputDialog.getText(self, "导出页面", "页码范围，例如 1-3,5：", text=f"1-{self.document.count}")
         if not ok:
             return
         try:
             pages = parse_page_range(value, self.document.count)
-            path, _ = QFileDialog.getSaveFileName(self, "导出页面", "导出页面.pdf", "PDF (*.pdf)")
+            path = choose_output_file(self, "导出页面", "导出页面.pdf", "PDF (*.pdf)", ".pdf")
             if path:
                 self.document.export_pages(pages, path)
                 self.status_label.setText(f"已导出 {len(pages)} 页：{path}")
@@ -657,23 +664,27 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             self.error(exc)
 
     def export_image(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出当前页", f"page-{self.view.current_page + 1}.png", "PNG (*.png)")
+        if not self.view.finish_inline_text():
+            return
+        path = choose_output_file(self, "导出当前页", f"page-{self.view.current_page + 1}.png", "PNG (*.png)", ".png")
         if path:
             try:
                 with export_destination(path) as output:
                     self.document.doc[self.view.current_page].get_pixmap(dpi=180, alpha=False).save(output)
-                self.status_label.setText("已导出 PNG：" + path)
+                self.status_label.setText(f"已导出 PNG：{path}")
             except Exception as exc:
                 self.error(exc)
 
     def export_text(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出文字", "文档文字.txt", "文本 (*.txt)")
+        if not self.view.finish_inline_text():
+            return
+        path = choose_output_file(self, "导出文字", "文档文字.txt", "文本 (*.txt)", ".txt")
         if path:
             try:
                 content = "\n\n".join(f"--- 第 {n + 1} 页 ---\n{self.document.page_text(n)}" for n in range(self.document.count))
                 with export_destination(path) as output:
                     output.write_text(content, encoding="utf-8")
-                self.status_label.setText("已导出文字：" + path)
+                self.status_label.setText(f"已导出文字：{path}")
             except Exception as exc:
                 self.error(exc)
 
@@ -690,6 +701,12 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
 
     def start_ocr(self, pages=None, automatic=False):
         if not self.document.count or (automatic and not self.auto_ocr.isChecked()):
+            return
+        if self.view.inline_editor is not None:
+            if automatic or not self.view.finish_inline_text():
+                return
+        if automatic and QApplication.activeModalWidget() is not None:
+            self.schedule_auto_ocr()
             return
         if self.ocr_process is not None:
             if automatic:
@@ -806,10 +823,11 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 self.ocr_temp.remove()
                 self.ocr_temp = None
             if self.ocr_pending_open == self.document_epoch and self.auto_ocr.isChecked():
-                QTimer.singleShot(0, lambda: self.start_ocr(automatic=True))
+                self.schedule_auto_ocr()
             self.ocr_pending_open = None
 
     def cancel_ocr(self):
+        self.auto_ocr_timer.stop()
         self.ocr_pending_open = None
         if self.ocr_process:
             self.ocr_cancelled = True
@@ -821,7 +839,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         if not widgets:
             QMessageBox.information(self, "表单", "当前页没有交互表单字段。普通扫描表格可用「加文字」填写。")
             return
-        dialog = QDialog(self)
+        dialog = DisposableDialog(self)
         dialog.setWindowTitle("填写当前页表单")
         dialog.resize(460, 360)
         layout = QVBoxLayout(dialog)
@@ -859,11 +877,14 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             self.mutate(fill)
 
     def print_document(self):
+        if not self.view.finish_inline_text():
+            return
         if not (self.document.doc.permissions & fitz.PDF_PERM_PRINT):
             return self.error(PdfError("此 PDF 禁止打印。"))
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setResolution(150)
         dialog = QPrintDialog(printer, self)
+        dialog.finished.connect(dialog.deleteLater)
         dialog.setMinMax(1, self.document.count)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
@@ -906,13 +927,11 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.plugin_menu.clear()
         for entry in entries:
             if entry["kind"] == "ai":
-                self.plugin_menu.addAction(self.action(entry["name"], lambda checked=False, e=entry: self.apply_ai_plugin(e)))
+                self.plugin_menu.addAction(entry["name"], lambda checked=False, e=entry: self.apply_ai_plugin(e))
         self.plugin_menu.setEnabled(not self.plugin_menu.isEmpty())
 
     def apply_ai_plugin(self, entry):
-        self.settings.values["ai"] = {"endpoint": entry["endpoint"], "model": entry["model"], "enabled": False}
-        self.ai.update_connection()
-        self.ai.configure()
+        self.ai.configure({"endpoint": entry["endpoint"], "model": entry["model"], "enabled": False})
 
     def show_help(self):
         text = ("PDF Reader " + __version__ + "\n\n"
@@ -980,8 +999,17 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
                 return
         self.capture_session()
         results = [self.ai.persist_state(s.ai_state) for s in self.sessions if s is not self.active_session]
+        if self.active_session and self.general_ai_state:
+            results.append(self.ai.persist_state(self.general_ai_state))
         results.append(self.ai.flush())
         if not all(results) and not self.ai.confirm_history_loss():
+            self.schedule_auto_ocr()
+            event.ignore()
+            return
+        # A second launch can be acknowledged while a save dialog runs its
+        # nested event loop. Keep the owner alive to deliver that request.
+        if self.file_open_router and self.file_open_router.activation_requested:
+            self.file_open_router.timer.start(0)
             self.schedule_auto_ocr()
             event.ignore()
             return

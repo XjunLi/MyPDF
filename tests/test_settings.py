@@ -3,6 +3,39 @@ import pytest
 from pdfreader.config import Settings, plugins, protect
 
 
+def test_unrelated_setting_does_not_erase_a_temporarily_unreadable_saved_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDFREADER_DATA_DIR", str(tmp_path))
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"ai":{"remember_key":True, "protected_key":"opaque-test-value"}}), encoding="utf-8")
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("temporary key store outage")
+    monkeypatch.setattr("pdfreader.config.protect", unavailable)
+    settings = Settings()
+    settings.values["ink_width"] = 3
+    settings.save()
+    assert json.loads(path.read_text(encoding="utf-8"))["ai"]["protected_key"] == "opaque-test-value"
+    settings.values["ai"]["remember_key"] = False
+    settings.save()
+    assert "protected_key" not in json.loads(path.read_text(encoding="utf-8"))["ai"]
+
+
+def test_stale_settings_merge_distinct_changes_and_preserve_conflicting_choices(tmp_path, monkeypatch):
+    monkeypatch.setenv("PDFREADER_DATA_DIR", str(tmp_path))
+    Settings().save()
+    first, second = Settings(), Settings()
+    first.values["ai"] = {"model": "first-model", "remember_key": True, "key": "synthetic-test-key"}
+    first.save()
+    second.values["ink_width"] = 5
+    second.save()
+    saved = Settings()
+    assert saved.values["ai"]["key"] == "synthetic-test-key" and saved.values["ink_width"] == 5
+    second.values["ai"] = {"model": "second-model"}
+    with pytest.raises(ValueError, match="另一窗口"):
+        second.save()
+    assert Settings().values["ai"]["model"] == "first-model"
+    assert "synthetic-test-key" not in second.path.read_text(encoding="utf-8")
+
+
 def test_upgrade_keeps_settings_key_and_plugins_without_changing_legacy(tmp_path, monkeypatch):
     monkeypatch.delenv("PDFREADER_DATA_DIR", raising=False)
     monkeypatch.delenv("SLATEPDF_DATA_DIR", raising=False)

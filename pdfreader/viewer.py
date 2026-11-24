@@ -62,6 +62,7 @@ class PageItem(QGraphicsItem):
 class PdfView(QGraphicsView):
     textInsertRequested = Signal(int, object)
     inlineStarted = Signal()
+    inlineFinished = Signal()
     regionChosen = Signal(str, int, object)
     markupChosen = Signal(str, object)
     inkChosen = Signal(int, object)
@@ -234,7 +235,9 @@ class PdfView(QGraphicsView):
 
     def dismiss_inline_text(self):
         editor,self.inline_editor=self.inline_editor,None
-        if editor: editor.dispose()
+        if editor:
+            editor.dispose()
+            self.inlineFinished.emit()
         self.viewport().update()
 
     def set_mode(self, mode):
@@ -618,12 +621,13 @@ class PdfView(QGraphicsView):
         copy = menu.addAction("复制  " + shortcut_text("Ctrl+C"), self.copy_selection)
         copy.setEnabled(bool(self.selected_text))
         for kind, name in (("highlight", "高亮"), ("underline", "下划线"), ("strike", "删除线")):
-            menu.addAction(name, lambda m=kind: self.markupChosen.emit(m, dict(self.text_boxes)))
+            menu.addAction(name, lambda checked=False, m=kind: self.markupChosen.emit(m, dict(self.text_boxes)))
         menu.addAction("注释所选文字", lambda: self.commentRequested.emit(dict(self.text_boxes), self.selected_text))
         menu.addSeparator()
         ai = menu.addAction("询问 AI", lambda: self.aiRequested.emit())
         ai.setEnabled(bool(self.selected_text))
         menu.exec(event.globalPos())
+        menu.deleteLater()
 
     def keyPressEvent(self, event):
         if self.inline_editor and self.scene_obj.focusItem() is self.inline_editor.proxy:

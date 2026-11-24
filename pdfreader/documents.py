@@ -3,15 +3,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import uuid
 
-from PySide6.QtCore import QTimer, QSize, Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QInputDialog, QLineEdit, QTabBar
 
 from .engine import PdfDocument, PdfError, PasswordRequired
 from .viewer import PdfView
 from .icons import icon_button
 from .chat_store import document_key
-from .paths import same_document_path
 from .pdf_files import FileConflict
+from .application import choose_output_file
 
 
 @dataclass(eq=False)
@@ -44,6 +44,7 @@ class DocumentTabs:
         view.regionChosen.connect(active(self.region_chosen))
         view.textInsertRequested.connect(active(self.insert_inline_text))
         view.inlineStarted.connect(active(self.cancel_ocr))
+        view.inlineFinished.connect(active(self.schedule_auto_ocr))
         view.markupChosen.connect(active(self.apply_markup))
         view.inkChosen.connect(active(lambda page, strokes: self.mutate(lambda: self.document.add_ink(page,strokes,color=(self.ink_color.redF(),self.ink_color.greenF(),self.ink_color.blueF()),width=self.ink_width))))
         view.editRequested.connect(active(self.edit_at))
@@ -80,7 +81,7 @@ class DocumentTabs:
     def capture_session(self):
         session = self.active_session
         if not session:
-            self.ai.take_state()
+            self.general_ai_state = self.ai.take_state()
             return
         view = session.view
         session.center = view.mapToScene(view.viewport().rect().center())
@@ -130,7 +131,7 @@ class DocumentTabs:
         if session:
             self.ai.open_document(session.document.path, session.key, session.name, session.ai_state)
         else:
-            self.ai.open_document()
+            self.ai.open_document(state=self.general_ai_state)
         self.stack.setCurrentWidget(self.view if session else self.welcome)
         if session and not self.view.items_by_page:
             self.view.rebuild(False)
@@ -163,12 +164,13 @@ class DocumentTabs:
             self.view.setFocus()
 
     def schedule_auto_ocr(self):
-        if self.auto_ocr.isChecked() and self.document.count:
-            epoch = self.document_epoch
-            QTimer.singleShot(450, lambda: self.start_ocr(automatic=True)
-                if epoch == self.document_epoch and self.auto_ocr.isChecked() else None)
+        if self.auto_ocr.isChecked() and self.document.count and self.view.inline_editor is None:
+            self.auto_ocr_timer.start()
 
     def add_document(self, document):
+        if not self.view.finish_inline_text():
+            document.close()
+            return None
         if document.path is None:
             self.untitled_sequence += 1
         session = DocumentSession(document, PdfView(document), f"未命名 {self.untitled_sequence}.pdf")
@@ -190,7 +192,7 @@ class DocumentTabs:
         return session
 
     def session_for_path(self, path):
-        return next((s for s in self.sessions if same_document_path(s.document.path, path)), None)
+        return next((s for s in self.sessions if s.document.matches_file(path)), None)
 
     def open_dialog(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "打开 PDF", "", "PDF (*.pdf)")
@@ -204,7 +206,17 @@ class DocumentTabs:
         existing = self.session_for_path(path)
         if existing:
             self.activate_session(existing)
-            return self.active_session is existing
+            if self.active_session is not existing:
+                return False
+            try:
+                if existing.document.follow_rename(path):
+                    self.ai.rebind_document(existing.document.path, existing.name)
+                    existing.ai_state = self.ai.snapshot()
+                    self.update_state()
+                return True
+            except Exception as exc:
+                self.error(exc)
+                return False
         document = PdfDocument()
         try:
             password = ""
@@ -217,7 +229,8 @@ class DocumentTabs:
                     if not ok:
                         document.close()
                         return False
-            self.add_document(document)
+            if self.add_document(document) is None:
+                return False
             if document.doc.get_sigflags() > 0:
                 QMessageBox.information(self, "文档含有签名字段", "修改并保存此文件可能使已有证书签名失效。建议另存副本。")
             return True
@@ -304,16 +317,9 @@ class DocumentTabs:
         suggested = path or session.name
         while True:
             if save_as or path is None:
-                chosen, _ = QFileDialog.getSaveFileName(self, "保存 PDF", str(suggested), "PDF (*.pdf)")
-                if not chosen:
+                path = choose_output_file(self, "保存 PDF", suggested, "PDF (*.pdf)", ".pdf")
+                if path is None:
                     return False
-                path = Path(chosen)
-                if path.suffix.lower() != ".pdf":
-                    path = Path(str(path) + ".pdf")
-                    if path.exists() and QMessageBox.question(self, "替换已有 PDF", f"“{path.name}”已存在，要替换它吗？",
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                            QMessageBox.StandardButton.Cancel) != QMessageBox.StandardButton.Yes:
-                        return False
             try:
                 other = self.session_for_path(path)
                 if other and other is not session:

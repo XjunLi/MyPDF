@@ -21,7 +21,15 @@ def exercise_file_protection(window, root, output):
         shutil.copyfile(root / "smoke-result.pdf", filename)
     assert window.open_file(path)
     first = window.active_session
+    contents, stamp = path.read_bytes(), path.stat()
+    assert window.save()
+    assert path.read_bytes() == contents and path.stat().st_mtime_ns == stamp.st_mtime_ns
+    output["checks"].append("save_without_edits_preserves_original_bytes_and_timestamp")
+    window.mutate(lambda: first.document.add_comment(0, (50, 50), "temporary annotation"))
+    removed = first.document.annotations()[-1]["xref"]
     window.mutate(lambda: first.document.add_comment(0, (62, 68), "unsaved across launches"))
+    kept = first.document.annotations()[-1]["xref"]
+    window.mutate(lambda: first.document.delete_annotation(0, removed))
     assert window.open_file(other)
     router = FileOpenRouter(QApplication.instance())
     router.set_window(window)
@@ -43,6 +51,21 @@ def exercise_file_protection(window, root, output):
         assert window.active_session is first and len(window.sessions) == 2
         assert first.document.dirty and first.document.annotations()[-1]["text"] == "unsaved across launches"
         output["checks"].append("second_desktop_launch_reuses_dirty_tab")
+        renamed = root / "改名后的文件.pdf"
+        path.replace(renamed)
+        path = renamed
+        assert window.open_file(renamed) and window.active_session is first and first.document.path == renamed
+        assert first.document.dirty and len(window.sessions) == 2
+        output["checks"].append("renamed_file_reuses_existing_draft")
+        third = root / "third document.pdf"
+        shutil.copyfile(other, third)
+        window.view.begin_inline_text(0, (80, first.document.doc[0].rect.height - 30))
+        editor = window.view.inline_editor
+        editor.input.setPlainText("Overflowing draft\n" * 20)
+        assert not window.open_file(third) and window.active_session is first and len(window.sessions) == 2
+        assert window.view.inline_editor is editor and "Overflowing draft" in editor.input.toPlainText()
+        window.view.finish_inline_text(cancel=True)
+        output["checks"].append("invalid_inline_edit_keeps_draft_and_does_not_add_tab")
         external = path.read_bytes() + b"\n% external revision\n"
         path.write_bytes(external)
         try:
@@ -59,11 +82,23 @@ def exercise_file_protection(window, root, output):
             page = result[0]
             assert any(note.info["content"] == "unsaved across launches" for note in page.annots())
         output["checks"].append("external_save_conflict_recovers_draft_to_copy")
+        assert window.mutate(lambda: first.document.edit_comment(0, kept, "edited after saving"))
+        assert window.save()
+        saved, stamp = copy.read_bytes(), copy.stat()
+        assert window.save() and copy.read_bytes() == saved and copy.stat().st_mtime_ns == stamp.st_mtime_ns
+        duplicate = root / "saved revision copy.pdf"
+        first.document.save(duplicate)
+        assert duplicate.read_bytes() == saved
+        with fitz.open(copy) as result:
+            page = result[0]
+            assert any(note.info["content"] == "edited after saving" for note in page.annots())
+        output["checks"].append("saved_annotation_reference_remains_editable")
         assert window.close_document() and window.close_document()
     finally:
         if process.state() != QProcess.ProcessState.NotRunning:
             process.kill()
             process.waitForFinished(5000)
         instance.close()
+        window.file_open_router = None
         QApplication.instance().removeEventFilter(router)
         router.deleteLater()

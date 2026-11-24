@@ -158,6 +158,28 @@ def test_edits_resume_interrupted_ocr_but_respect_explicit_cancel(qapp, pdf_path
     window.close()
 
 
+def test_scheduled_ocr_waits_for_inline_editor_and_resumes_after_escape(qapp, pdf_path, tmp_path, monkeypatch, qt_wait):
+    window = reader(qapp, pdf_path, tmp_path, monkeypatch)
+    scans = []
+    monkeypatch.setattr(window.document, "scan_candidates", lambda: scans.append(1) or [])
+    window.auto_ocr.blockSignals(True)
+    window.auto_ocr.setChecked(True)
+    window.auto_ocr.blockSignals(False)
+    try:
+        window.schedule_auto_ocr()
+        window.view.begin_inline_text(0, (80, 190))
+        editor = window.view.inline_editor
+        editor.input.setPlainText("still typing")
+        QTest.qWait(750)
+        assert scans == [] and window.view.inline_editor is editor
+        QTest.keyClick(editor.input, Qt.Key.Key_Escape)
+        qt_wait(lambda: scans == [1])
+        assert not window.document.dirty
+    finally:
+        window.view.finish_inline_text(cancel=True)
+        window.close()
+
+
 def test_signature_hides_placement_box_while_signing_and_after_cancel(qapp, pdf_path, tmp_path, monkeypatch):
     window = reader(qapp, pdf_path, tmp_path, monkeypatch)
     seen = []
