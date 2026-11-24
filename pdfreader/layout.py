@@ -82,6 +82,17 @@ class DocumentTabBar(QTabBar):
         return size
 
 
+class OutlineTree(QTreeWidget):
+    def keyPressEvent(self, event):
+        item = self.currentItem()
+        if (item is not None and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and event.modifiers() in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.KeypadModifier)):
+            self.itemActivated.emit(item, self.currentColumn())
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class ReaderLayout:
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -280,7 +291,7 @@ class ReaderLayout:
         self.thumbnails.setObjectName("thumbnails")
         self.thumbnails.clicked.connect(lambda index: self.view.goto(index.row()))
         self.thumbnails.activated.connect(lambda index: self.view.goto(index.row()))
-        self.bookmarks = QTreeWidget()
+        self.bookmarks = OutlineTree()
         self.bookmarks.setHeaderHidden(True)
         self.bookmarks.itemClicked.connect(self.go_to_bookmark)
         self.bookmarks.itemActivated.connect(self.go_to_bookmark)

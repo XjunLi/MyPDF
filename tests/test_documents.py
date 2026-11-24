@@ -169,8 +169,11 @@ def test_outline_empty_state_and_keyboard_activation(reader, qapp):
     reader.left_action.trigger()
     reader.left.setCurrentIndex(1)
     reader.bookmarks.setCurrentItem(reader.bookmarks.topLevelItem(1))
-    QTest.keyClick(reader.bookmarks, Qt.Key.Key_Return)
-    assert reader.view.current_page == 1
+    for key, modifier in ((Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier),
+                          (Qt.Key.Key_Enter, Qt.KeyboardModifier.KeypadModifier)):
+        reader.view.goto(0)
+        QTest.keyClick(reader.bookmarks, key, modifier)
+        assert reader.view.current_page == 1
     reader.new_document()
     qapp.processEvents()
     assert reader.empty_outline.isVisible()
