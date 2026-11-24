@@ -11,7 +11,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, QObject, Slot
 from PySide6.QtGui import QActionGroup, QKeySequence, QPixmap, QShortcut, QCursor
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPlainTextEdit, QMessageBox, QFrame, QMenu, QToolButton, QDialog,
-    QDialogButtonBox, QFileDialog, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QTabWidget)
+    QDialogButtonBox, QFileDialog, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QTabWidget,
+    QSizePolicy, QStyle, QStyleOptionToolButton, QStylePainter)
 
 from .ai import AIJob, validate_endpoint, history_for_request
 from .application import shortcut_text
@@ -20,6 +21,29 @@ from .chat_store import ChatStore, document_key
 from .ai_context import background_message, document_mode
 from .dialogs import AISettingsDialog
 from .icons import icon, icon_button
+
+
+class ModelLabel(QLabel):
+    def setText(self, text):
+        self.setAccessibleName(text)
+        self.fit_text()
+
+    def fit_text(self):
+        super().setText(self.fontMetrics().elidedText(self.accessibleName(), Qt.TextElideMode.ElideRight,
+                                                     self.contentsRect().width()))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit_text()
+
+
+class AttachmentButton(QToolButton):
+    def paintEvent(self, event):
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.text = self.fontMetrics().elidedText(option.text, Qt.TextElideMode.ElideRight, max(0, self.width() - 14))
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
 
 
 class _AIReceiver(QObject):
@@ -92,10 +116,10 @@ class AIPanel(QWidget):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(8)
         row = QHBoxLayout()
-        self.connection = QLabel()
+        self.connection = ModelLabel()
         self.connection.setTextFormat(Qt.TextFormat.PlainText)
         self.connection.setObjectName("muted")
-        self.connection.setMaximumWidth(300)
+        self.connection.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.connection, 1)
         row.addWidget(icon_button("history", "历史对话 · 当前 PDF", self.show_history))
         self.more_button = icon_button("more", "对话选项")
@@ -147,7 +171,9 @@ class AIPanel(QWidget):
         self.add_button.setMenu(self.attachment_menu)
         self.add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         row.addWidget(self.add_button)
-        self.attachment_chip = QToolButton()
+        self.attachment_chip = AttachmentButton()
+        self.attachment_chip.setMinimumWidth(28)
+        self.attachment_chip.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.attachment_chip.setObjectName("attachmentChip")
         self.attachment_chip.clicked.connect(self.preview_attachment)
         row.addWidget(self.attachment_chip)
@@ -170,6 +196,7 @@ class AIPanel(QWidget):
         composer.addLayout(row)
         layout.addWidget(self.composer)
         self.save_status = QLabel()
+        self.save_status.setWordWrap(True)
         self.save_status.setObjectName("muted")
         self.save_status.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.save_status)
@@ -179,7 +206,7 @@ class AIPanel(QWidget):
     def update_connection(self):
         config = self.settings.values.get("ai", {})
         model = config.get("model") or "连接模型"
-        self.connection.setText(model[:27] + ("…" if len(model) > 27 else ""))
+        self.connection.setText(model)
         host = urlsplit(config.get("endpoint", "")).hostname or "尚未配置服务"
         self.connection.setToolTip(f"{model}\n{host}\n自动模式：每次提问包含整份 PDF 背景、当前页图片和选区。\n＋ 可切换附加范围；服务端数据政策请向服务提供方确认。")
         self.update_preview()

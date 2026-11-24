@@ -20,6 +20,8 @@ QToolBar#topTools { border-bottom:1px solid #e5e7eb; }
 QToolBar#searchBar { border-bottom:1px solid #e5e7eb; padding:6px 18px; }
 QToolBar#footer { background:#fff; border-top:1px solid #e5e7eb; padding:5px 12px; }
 QToolBar::separator { width:1px; background:#e5e7eb; margin:7px 7px; }
+QToolBar#topTools[compact="true"], QToolBar#footer[compact="true"] { spacing:1px; padding-left:5px; padding-right:5px; }
+QToolBar[compact="true"]::separator { margin:7px 3px; }
 QToolButton { background:transparent; border:1px solid transparent; border-radius:6px; padding:6px; }
 QToolButton:hover { background:#f0f2f5; }
 QToolButton:pressed { background:#e5eaf2; }
@@ -41,6 +43,7 @@ QLineEdit, QSpinBox, QComboBox, QPlainTextEdit, QTextBrowser { background:#fff; 
 QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus, QComboBox:focus { border-color:#9bb8e8; }
 QSpinBox { padding:5px 2px; }
 QComboBox { min-height:18px; padding:5px 20px 5px 8px; }
+QComboBox#zoomLevel { padding:5px 2px 5px 5px; }
 QComboBox::drop-down { border:0; width:18px; }
 QComboBox::down-arrow { image:url(ASSET_ROOT/chevron-down.svg); width:12px; height:12px; }
 QComboBox QAbstractItemView { background:#fff; border:1px solid #e1e5eb; selection-background-color:#eaf0fc; padding:4px; outline:0; }
@@ -62,12 +65,10 @@ QTabBar#documentTabs::tab:hover { background:#eef2f8; }
 QTabBar#documentTabs QToolButton { background:#fff; border:0; border-radius:0; padding:4px; }
 QTabBar#documentTabs QToolButton#documentClose { background:transparent; border:0; border-radius:4px; padding:3px; }
 QTabBar#documentTabs QToolButton#documentClose:hover { background:#e3e9f2; }
-QListWidget, QTreeWidget { background:#fafbfc; border:0; outline:0; }
+QListWidget, QTreeWidget, QListView#thumbnails { background:#fafbfc; border:0; outline:0; }
 QListWidget::item { padding:9px 8px; margin:3px 2px; border-radius:5px; }
 QListWidget::item:selected { background:#e9effa; color:#326ad5; }
 QListWidget::item:hover { background:#f0f3f8; }
-QListWidget#thumbnails::item { margin:3px 5px; padding:7px 5px; border:1px solid transparent; }
-QListWidget#thumbnails::item:selected { background:#e9effa; border-color:#d0ddf3; }
 QTreeWidget::item { padding:8px 4px; }
 QTreeWidget::item:selected { background:#e9effa; color:#326ad5; }
 QSplitter::handle { background:#e4e7ec; }

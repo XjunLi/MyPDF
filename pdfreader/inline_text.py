@@ -4,7 +4,7 @@ from collections import OrderedDict
 import pymupdf as fitz
 from PySide6.QtCore import QObject,QEvent,QPointF,QRectF,QTimer,Qt,Slot
 from PySide6.QtGui import QColor,QFont,QPen,QTextCursor,QTextCharFormat,QTextBlockFormat,QFontMetricsF
-from PySide6.QtWidgets import (QApplication,QPlainTextEdit,QFrame,QHBoxLayout,QComboBox,
+from PySide6.QtWidgets import (QApplication,QPlainTextEdit,QFrame,QBoxLayout,QHBoxLayout,QComboBox,
     QDoubleSpinBox,QColorDialog,QDialog,QGraphicsProxyWidget,QVBoxLayout,QLabel,QPushButton,QWidget)
 from .application import shortcut_text
 from .fonts import font_choices,qt_family,library_face,qt_original_family,catalog_match
@@ -68,20 +68,28 @@ class InlineTextEditor(QObject):
         self.toolbar=QFrame(view.viewport()); self.toolbar.setObjectName("inlineTextTools")
         self.toolbar.setStyleSheet("QFrame#inlineTextTools {background:#fff;border:1px solid #dce3ee;border-radius:6px;}")
         outer=QVBoxLayout(self.toolbar); outer.setContentsMargins(5,3,5,3); outer.setSpacing(4)
-        row=QHBoxLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(3); outer.addLayout(row)
+        self.controls = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.controls.setSpacing(3)
+        outer.addLayout(self.controls)
+        self.format_row = QHBoxLayout()
+        self.action_row = QHBoxLayout()
+        for group in (self.format_row, self.action_row):
+            group.setSpacing(3)
+            self.controls.addLayout(group)
         self.move=icon_button("move","拖动移动文字框")
         self.move.setCursor(Qt.CursorShape.SizeAllCursor); self.move.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.move.installEventFilter(self); row.addWidget(self.move)
+        self.move.installEventFilter(self); self.format_row.addWidget(self.move)
         self.font=QComboBox(); self.font.setFixedWidth(138)
-        self.populate_fonts(self.fontname); row.addWidget(self.font)
+        self.populate_fonts(self.fontname); self.format_row.addWidget(self.font)
         self.size=QDoubleSpinBox(); self.size.setRange(1,500); self.size.setDecimals(1); self.size.setValue(region.primary_style.size if region else 12)
-        self.size.setFixedWidth(64); self.size.setSuffix(" pt"); row.addWidget(self.size)
-        self.color_button=icon_button("ink","文字颜色",self.choose_color); row.addWidget(self.color_button)
-        self.library_button=icon_button("gear","字体库",self.open_library); row.addWidget(self.library_button)
+        self.size.setFixedWidth(64); self.size.setSuffix(" pt"); self.format_row.addWidget(self.size)
+        self.action_row.addStretch()
+        self.color_button=icon_button("ink","文字颜色",self.choose_color); self.action_row.addWidget(self.color_button)
+        self.library_button=icon_button("gear","字体库",self.open_library); self.action_row.addWidget(self.library_button)
         self.apply=icon_button("check","完成 · "+shortcut_text("Ctrl+Return"),lambda:view.finish_inline_text())
         self.cancel=icon_button("close","取消 · Esc",lambda:view.finish_inline_text(cancel=True))
         self.apply.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.cancel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        row.addWidget(self.apply); row.addWidget(self.cancel)
+        self.action_row.addWidget(self.apply); self.action_row.addWidget(self.cancel)
         self.error_area=QWidget(self.toolbar)
         error_layout=QVBoxLayout(self.error_area); error_layout.setContentsMargins(4,4,4,3); error_layout.setSpacing(5)
         self.error_label=QLabel(); self.error_label.setWordWrap(True)
@@ -441,7 +449,15 @@ class InlineTextEditor(QObject):
         self.proxy.setPos(self.point); self.proxy.setRotation(self.angle)
         self.proxy.resize(self.body_width,self.body_height)
         point=self.view.mapFromScene(parent.mapToScene(self.point))
-        self.toolbar.adjustSize()
+        layout = self.toolbar.layout()
+        margins = layout.contentsMargins()
+        natural = (self.format_row.sizeHint().width() + self.action_row.sizeHint().width()
+                   + self.controls.spacing() + margins.left() + margins.right())
+        width = min(natural, max(1, self.view.viewport().width() - 4))
+        self.controls.setDirection(QBoxLayout.Direction.TopToBottom if width < natural else QBoxLayout.Direction.LeftToRight)
+        self.toolbar.setFixedWidth(width)
+        height = layout.totalHeightForWidth(width) if layout.hasHeightForWidth() else layout.sizeHint().height()
+        self.toolbar.resize(width, height)
         x=max(2,min(point.x(),self.view.viewport().width()-self.toolbar.width()-2))
         y=point.y()-self.toolbar.height()-5
         if y<0: y=point.y()+math.ceil(self.body_height*self.view.transform().m11())+5

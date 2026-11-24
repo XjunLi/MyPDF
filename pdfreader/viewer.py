@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from bisect import bisect_right
 import math
 import pymupdf as fitz
 from PySide6.QtCore import Qt, QRectF, QPointF, QUrl, Signal, QTimer
@@ -106,11 +107,13 @@ class PdfView(QGraphicsView):
         self.annotations_by_page = {}
         self.link_page = None
         self.page_links = []
-        self.fit_mode, self.rebuilding = True, False
+        self.fit_mode = "width"
+        self.last_fit_viewport = None
+        self.rebuilding = self.fitting = False
         self.verticalScrollBar().valueChanged.connect(self._page_at_center)
         self.resize_timer = QTimer(self)
         self.resize_timer.setSingleShot(True)
-        self.resize_timer.timeout.connect(lambda: self.fit_width() if self.fit_mode else None)
+        self.resize_timer.timeout.connect(self.apply_fit)
         self.scroll_timer = QTimer(self)
         self.scroll_timer.setInterval(25)
         self.scroll_timer.timeout.connect(self._auto_scroll)
@@ -176,7 +179,7 @@ class PdfView(QGraphicsView):
         self.scene_obj.setSceneRect(0, 0, maxwidth + 64, y)
         self.current_page = number
         if self.fit_mode:
-            self.fit_width()
+            self.apply_fit(number)
         if offset is not None:
             self.centerOn(self.items_by_page[number].pos() + offset)
         else:
@@ -242,14 +245,15 @@ class PdfView(QGraphicsView):
         self.viewport().setCursor(Qt.CursorShape.OpenHandCursor if mode == "hand" else Qt.CursorShape.IBeamCursor if mode in TEXT_TOOLS else Qt.CursorShape.CrossCursor)
 
     def set_zoom(self, value, manual=True, anchor=None):
-        if not math.isfinite(value):
+        if not math.isfinite(value) or (not manual and value <= 0):
             return
         anchor = anchor or self.viewport().rect().center()
         before = self.mapToScene(anchor)
-        self.zoom = max(.15, min(5, value))
+        self.zoom = max(.15, min(5, value)) if manual else value
         if manual:
-            self.fit_mode = False
+            self.fit_mode = None
             self.resize_timer.stop()
+            self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         display_zoom = self.zoom * self.points_to_pixels
         self.setTransform(QTransform.fromScale(display_zoom, display_zoom))
         center = self.viewport().rect().center()
@@ -259,14 +263,44 @@ class PdfView(QGraphicsView):
         if self.inline_editor: self.inline_editor.position()
 
     def fit_width(self):
-        if self.document.count:
-            self.set_zoom((self.viewport().width() - 4) / self.scene_obj.sceneRect().width() / self.points_to_pixels, manual=False)
+        self.fit_mode = "width"
+        self.apply_fit()
 
     def fit_page(self):
-        if self.document.count:
-            rect = self.document.doc[self.current_page].rect
-            self.set_zoom(min((self.viewport().width() - 64) / rect.width, (self.viewport().height() - 48) / rect.height) / self.points_to_pixels)
+        self.fit_mode = "page"
+        if self.items_by_page:
             self.goto(self.current_page)
+
+    def apply_fit(self, number=None):
+        if not self.fit_mode or not self.items_by_page or self.fitting:
+            return
+        item = self.items_by_page[self.current_page if number is None else number]
+        viewport = self.viewport()
+        if self.fit_mode == "width":
+            scale = max(1, viewport.width() - 4) / (item.size.width() + 64)
+        else:
+            scale = min(max(1, viewport.width() - 64) / item.size.width(),
+                        max(1, viewport.height() - 48) / item.size.height())
+        # All page centers share one scene X even in mixed-size documents.
+        # Preserve the reading position while scroll bars react to the transform.
+        center = self.mapToScene(viewport.rect().center())
+        center.setX(item.pos().x() + item.size.width() / 2)
+        if self.fit_mode == "page" and viewport.size() != self.last_fit_viewport:
+            center = item.mapToScene(item.size.center())
+        self.last_fit_viewport = viewport.size()
+        self.fitting = True
+        try:
+            # QGraphicsView uses the platform scrollbar extent internally, which
+            # can exceed the styled bar's actual width by several pixels.
+            policy = (Qt.ScrollBarPolicy.ScrollBarAlwaysOff if self.sceneRect().width() * scale <= viewport.width()
+                      else Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            if policy != self.horizontalScrollBarPolicy():
+                self.setHorizontalScrollBarPolicy(policy)
+            if not math.isclose(scale, self.transform().m11(), rel_tol=1e-8):
+                self.set_zoom(scale / self.points_to_pixels, manual=False)
+            self.centerOn(center)
+        finally:
+            self.fitting = False
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -285,19 +319,26 @@ class PdfView(QGraphicsView):
 
     def _page_at_center(self):
         if self.inline_editor: self.inline_editor.position()
-        if not self.items_by_page or self.rebuilding:
+        if not self.items_by_page or self.rebuilding or self.fitting:
             return
         y = self.mapToScene(self.viewport().rect().center()).y()
-        number = min(range(len(self.items_by_page)), key=lambda n: abs(self.items_by_page[n].pos().y() + self.items_by_page[n].size.height() / 2 - y))
+        # The midpoint of the 24-point gutter separates adjacent pages.
+        number = max(0, bisect_right(self.items_by_page, y + 12, key=lambda item: item.pos().y()) - 1)
         if number != self.current_page:
+            old_size = self.items_by_page[self.current_page].size.size()
+            new_size = self.items_by_page[number].size.size()
             self.current_page = number
             self.pageChanged.emit(number)
+            if self.fit_mode and old_size != new_size:
+                self.resize_timer.start(70)
 
     def goto(self, page, rect=None, *, destination=None):
         if not self.items_by_page:
             return
         page = max(0, min(int(page), len(self.items_by_page) - 1))
         item = self.items_by_page[page]
+        if self.fit_mode:
+            self.apply_fit(page)
         if destination is not None:
             # MuPDF resolves PDF destinations in the target's rotated display space.
             x, y = destination
@@ -312,6 +353,8 @@ class PdfView(QGraphicsView):
         elif rect is not None:
             r = fitz.Rect(rect) * self.document.doc[page].rotation_matrix
             self.centerOn(item.mapToScene(QPointF((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)))
+        elif self.fit_mode == "page":
+            self.centerOn(item.mapToScene(item.size.center()))
         else:
             delta = self.mapFromScene(item.pos()).y() - 24
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta)

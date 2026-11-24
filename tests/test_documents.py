@@ -38,6 +38,175 @@ def another_pdf(pdf_path, tmp_path, name="second.pdf"):
     return path
 
 
+def click_widget(widget, pos=None):
+    QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=pos or widget.rect().center())
+
+
+def test_dual_panel_thumbnails_resize_and_follow_keyboard(reader, qt_wait):
+    reader.resize(1380, 760)
+    reader.document.doc[1].set_rotation(90)
+    for _ in range(18):
+        reader.document.doc.new_page()
+    reader.after_change()
+    click_widget(reader.top.widgetForAction(reader.left_action))
+    click_widget(reader.top.widgetForAction(reader.panel_actions["ai"]))
+    thumbs = reader.thumbnails
+    reader.splitter.setSizes([160, 868, 350])
+    qt_wait(lambda: 0 in thumbs.pages.icons and not thumbs.timer.isActive())
+    small = thumbs.pages.icons[0].deviceIndependentSize()
+    reader.splitter.setSizes([300, 728, 350])
+    qt_wait(lambda: thumbs.pages.icons[0].deviceIndependentSize().width() > small.width() + 50
+            and 1 in thumbs.pages.icons and not thumbs.timer.isActive())
+    row = thumbs.visualRect(thumbs.pages.index(0))
+    assert row.width() == thumbs.viewport().width()
+    image = thumbs.pages.icons[0]
+    assert image.devicePixelRatioF() == thumbs.devicePixelRatioF()
+    assert abs(image.deviceIndependentSize().width() - thumbs.paper_size(0).width()) <= 2
+    landscape = thumbs.visualRect(thumbs.pages.index(1))
+    assert landscape.height() < row.height()
+    assert landscape.top() == row.bottom() + 1
+    assert thumbs.visualRect(thumbs.pages.index(2)).top() == landscape.bottom() + 1
+    # Sample the actual delegate output in physical pixels: the selected page
+    # has two equidistant blue edges, with untinted white paper between them.
+    screen = thumbs.viewport().grab().toImage()
+    dpr = screen.devicePixelRatioF()
+    y = round((row.y() + 20) * dpr)
+    edges = [x for x in range(screen.width()) if screen.pixelColor(x, y).name() == "#5083d5"]
+    assert edges and abs(edges[0] + edges[-1] - screen.width()) <= 5 * dpr
+    assert screen.pixelColor(screen.width() // 2, y).name() == "#ffffff"
+    click_widget(thumbs.viewport(), thumbs.visualRect(thumbs.pages.index(1)).center())
+    assert reader.view.current_page == 1
+    QTest.keyClick(thumbs, Qt.Key.Key_End)
+    qt_wait(lambda: reader.view.current_page == 19 and 19 in thumbs.pages.icons)
+    assert len(thumbs.pages.icons) < 16
+    reader.left_action.trigger()
+    assert not thumbs.timer.isActive()
+    reader.view.goto(8)
+    reader.left_action.trigger()
+    qt_wait(lambda: thumbs.viewport().rect().intersects(thumbs.visualRect(thumbs.pages.index(8))))
+
+
+def test_fit_modes_track_mixed_pages_and_viewport(reader, qapp, qt_wait):
+    reader.resize(1100, 690)
+    reader.document.doc[1].set_mediabox(fitz.Rect(0, 0, 1100, 460))
+    reader.after_change()
+    view = reader.view
+    def page_rect():
+        item = view.items_by_page[view.current_page]
+        return view.mapFromScene(item.mapRectToScene(item.size)).boundingRect()
+    def fits_width():
+        width = view.items_by_page[view.current_page].size.width()
+        return abs((width + 64) * view.transform().m11() - (view.viewport().width() - 4)) < 1
+    def settle_fit(check):
+        qapp.processEvents()  # Scroll bar visibility changes the usable viewport.
+        qt_wait(lambda: not view.resize_timer.isActive() and check())
+    reader.fit_width()
+    settle_fit(fits_width)
+    reader.left_action.trigger()
+    reader.panel_actions["ai"].trigger()
+    settle_fit(fits_width)
+    assert abs(page_rect().center().x() - view.viewport().rect().center().x()) <= 2
+    view.goto(1)
+    settle_fit(fits_width)
+    view.fit_page()
+    settle_fit(lambda: view.viewport().rect().contains(page_rect()))
+    small = view.zoom
+    reader.panel_actions["ai"].trigger()
+    settle_fit(lambda: view.zoom > small and view.viewport().rect().contains(page_rect()))
+    assert view.current_page == 1
+    view.set_zoom(1.25)
+    reader.panel_actions["ai"].trigger()
+    QTest.qWait(160)
+    assert view.zoom == 1.25
+
+
+def test_compact_editor_and_composer_keep_actions_reachable(reader, qt_wait):
+    from test_selection import visible_point
+    reader.resize(760, 480)
+    reader.left_action.trigger()
+    reader.show_panel("ai")
+    reader.splitter.setSizes([300, 1, 600])
+    view = reader.view
+    view.fit_page()
+    qt_wait(lambda: reader.width() == 760 and not view.resize_timer.isActive())
+    assert view.viewport().width() >= 290
+    reader.mode_actions["edit"].trigger()
+    line = reader.document.doc[0].search_for("Replace this original sentence.")[0]
+    click_widget(view.viewport(), visible_point(view, 0, (line.tl + line.br) / 2))
+    editor = view.inline_editor
+    assert editor is not None
+    editor.show_error("A message with extra words that must wrap inside the editor." * 2)
+    qt_wait(lambda: editor.error_area.isVisible())
+    def inside(child, parent):
+        return parent.rect().contains(child.rect().translated(child.mapTo(parent, QPoint())))
+    for widget in (editor.font, editor.size, editor.apply, editor.cancel, editor.discard_button, editor.error_label):
+        assert inside(widget, view.viewport())
+    editor.input.selectAll()
+    QTest.keyClicks(editor.input, "Successfully edited")
+    click_widget(editor.apply)
+    assert view.inline_editor is None
+    assert reader.document.doc[0].search_for("Successfully edited")
+    reader.mode_actions["text"].trigger()
+    click_widget(view.viewport(), visible_point(view, 0, (40, 230)))
+    assert view.inline_editor is not None
+    click_widget(view.inline_editor.cancel)
+    assert view.inline_editor is None
+    ai = reader.ai
+    reader.settings.values["ai"]["model"] = "W" * 120
+    ai.update_connection()
+    ai.set_attachment(1)
+    ai.continue_from = "partial"
+    ai.set_idle()
+    qt_wait(lambda: ai.continue_button.isVisible() and ai.connection.text().endswith("…"))
+    assert ai.connection.accessibleName() == "W" * 120
+    for widget in (ai.add_button, ai.attachment_chip, ai.remove_attachment, ai.continue_button, ai.send_button):
+        assert inside(widget, ai.composer)
+    click_widget(ai.remove_attachment)
+    assert not ai.attachment_chip.isVisible() and ai.attachment_kind == 0
+
+
+def test_outline_empty_state_and_keyboard_activation(reader, qapp):
+    reader.left_action.trigger()
+    reader.left.setCurrentIndex(1)
+    reader.bookmarks.setCurrentItem(reader.bookmarks.topLevelItem(1))
+    QTest.keyClick(reader.bookmarks, Qt.Key.Key_Return)
+    assert reader.view.current_page == 1
+    reader.new_document()
+    qapp.processEvents()
+    assert reader.empty_outline.isVisible()
+    click_widget(reader.document_tabs, reader.document_tabs.tabRect(0).center())
+    assert reader.bookmarks.isVisible() and not reader.empty_outline.isVisible()
+    assert reader.bookmarks.topLevelItem(0).toolTip(0) == "Overview"
+
+
+def test_minimum_window_with_tabs_search_and_ocr(reader, pdf_path, tmp_path, qapp, qt_wait):
+    reader.open_file(another_pdf(pdf_path, tmp_path))
+    reader.resize(760, 440)
+    reader.left_action.trigger()
+    reader.panel_actions["comment"].trigger()
+    reader.modified_label.setText("未保存")
+    reader.ocr_progress_action.setVisible(True)
+    reader.ocr_stop_action.setVisible(True)
+    QTest.keyClick(reader.view, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(reader.search_input, "reading")
+    qt_wait(lambda: reader.search_results and not reader.search_running)
+    QTest.keyClick(reader.search_input, Qt.Key.Key_Escape)
+    assert reader.search_bar.isHidden()
+    reader.fit_width()
+    qapp.processEvents()
+    qt_wait(lambda: not reader.view.resize_timer.isActive() and not reader.view.horizontalScrollBar().isVisible())
+    for bar in (reader.top, reader.footer):
+        for action in bar.actions():
+            widget = bar.widgetForAction(action)
+            if action.isVisible() and widget is not None and not action.isSeparator():
+                assert widget.isVisible(), action.text()
+    assert reader.document_tabs.width() >= reader.document_tabs.tabSizeHint(0).width()
+    zoom_field = reader.zoom_combo.lineEdit()
+    assert zoom_field.width() >= zoom_field.fontMetrics().horizontalAdvance("500%") + 4
+    reader.view.set_zoom(3)
+    qt_wait(lambda: reader.view.horizontalScrollBar().isVisible())
+
+
 def test_tabs_only_appear_for_multiple_documents_and_preserve_reading(reader, pdf_path, tmp_path, qapp):
     first = reader.active_session
     assert reader.document_tabs.isHidden()

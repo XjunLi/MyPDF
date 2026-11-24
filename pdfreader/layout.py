@@ -83,6 +83,19 @@ class DocumentTabBar(QTabBar):
 
 
 class ReaderLayout:
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = event.size().width() < 940
+        if not hasattr(self, "zoom_combo") or self.top.property("compact") == compact:
+            return
+        for bar in (self.top, self.footer):
+            bar.setProperty("compact", compact)
+            bar.style().unpolish(bar)
+            bar.style().polish(bar)
+            bar.updateGeometry()
+        self.zoom_combo.setFixedWidth(70 if compact else 86)
+        self.ocr_progress.setFixedWidth(56 if compact else 96)
+
     def toolbar_action(self, bar, name, label, callback, shortcut=None, **kwargs):
         action = self.action(label, callback, shortcut, **kwargs)
         action.setIcon(icon(name))
@@ -260,21 +273,31 @@ class ReaderLayout:
         central_layout.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
         self.left = QTabWidget()
-        self.left.setMinimumWidth(160)
+        self.left.setMinimumWidth(144)
         self.left.setMaximumWidth(300)
         self.left.setIconSize(QSize(18, 18))
         self.thumbnails = ThumbnailView()
         self.thumbnails.setObjectName("thumbnails")
         self.thumbnails.clicked.connect(lambda index: self.view.goto(index.row()))
+        self.thumbnails.activated.connect(lambda index: self.view.goto(index.row()))
         self.bookmarks = QTreeWidget()
         self.bookmarks.setHeaderHidden(True)
-        self.bookmarks.itemClicked.connect(lambda item, column: self.view.goto(item.data(0, Qt.ItemDataRole.UserRole)))
+        self.bookmarks.itemClicked.connect(self.go_to_bookmark)
+        self.bookmarks.itemActivated.connect(self.go_to_bookmark)
         self.left.addTab(self.thumbnails, icon("pages"), "")
-        self.left.addTab(self.bookmarks, icon("outline"), "")
+        self.outline_stack = QStackedWidget()
+        self.outline_stack.addWidget(self.bookmarks)
+        self.empty_outline = QLabel("此文档没有目录")
+        self.empty_outline.setObjectName("muted")
+        self.empty_outline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.outline_stack.addWidget(self.empty_outline)
+        self.outline_stack.setCurrentWidget(self.empty_outline)
+        self.left.addTab(self.outline_stack, icon("outline"), "")
         self.left.setTabToolTip(0, "页面")
         self.left.setTabToolTip(1, "目录")
         self.splitter.addWidget(self.left)
         self.stack = QStackedWidget()
+        self.stack.setMinimumWidth(304)
         self.welcome = self.make_welcome()
         self.stack.addWidget(self.welcome)
         self.view = PdfView(self.document)
@@ -283,7 +306,7 @@ class ReaderLayout:
         self.connect_view(self.view)
         self.splitter.addWidget(self.stack)
         self.right = QTabWidget()
-        self.right.setMinimumWidth(300)
+        self.right.setMinimumWidth(280)
         self.right.setMaximumWidth(600)
         self.right.setIconSize(QSize(18, 18))
         self.ai = AIPanel(self.settings, self.ai_context, image_provider=self.ai_page_image, preparation_provider=self.prepare_ai_attachment,
@@ -353,6 +376,7 @@ class ReaderLayout:
         self.footer.addSeparator()
         self.toolbar_action(self.footer, "minus", "缩小", lambda: self.view.set_zoom(self.view.zoom / 1.15), "Ctrl+-", document=True)
         self.zoom_combo = QComboBox()
+        self.zoom_combo.setObjectName("zoomLevel")
         self.zoom_combo.setEditable(True)
         self.zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%", "500%"])
         self.zoom_combo.setFixedWidth(86)

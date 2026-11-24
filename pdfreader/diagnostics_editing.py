@@ -1,6 +1,6 @@
 """Actual widget/scene interaction checks, also run in frozen builds."""
 import pymupdf as fitz
-from PySide6.QtCore import Qt,QPointF
+from PySide6.QtCore import Qt,QPoint,QPointF,QElapsedTimer
 from PySide6.QtGui import QColor,QInputMethodEvent,QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -125,4 +125,31 @@ def exercise_editing(window,root,output):
         assert saved[0].get_images()
     output["checks"].append("typed_and_image_signature_roundtrip")
     window.grab().save(str(root/"editing-result.png"))
+    window.resize(800, 540)
+    if window.left.isHidden():
+        window.left_action.trigger()
+    window.show_panel("ai")
+    window.splitter.setSizes([240, 1, 450])
+    window.view.goto(0)
+    window.view.fit_page()
+    app.processEvents()
+    timer = QElapsedTimer()
+    timer.start()
+    while (0 not in window.thumbnails.pages.icons or window.view.resize_timer.isActive()) and timer.elapsed() < 3000:
+        QTest.qWait(10)
+    thumb = window.thumbnails.pages.icons[0]
+    assert thumb.devicePixelRatioF() == window.thumbnails.devicePixelRatioF()
+    row = window.thumbnails.visualRect(window.thumbnails.pages.index(0))
+    assert row.width() == window.thumbnails.viewport().width()
+    window.mode_actions["text"].trigger()
+    click((65, 230))
+    editor = window.view.inline_editor
+    assert editor is not None
+    for button in (editor.apply, editor.cancel):
+        bounds = button.rect().translated(button.mapTo(window.view.viewport(), QPoint()))
+        assert window.view.viewport().rect().contains(bounds)
+    window.grab().save(str(root / "compact-panels.png"))
+    QTest.mouseClick(editor.cancel, Qt.MouseButton.LeftButton)
+    assert window.view.inline_editor is None
+    output["checks"].append("compact_dual_panels_dpi_thumbnails_and_edit_controls")
     assert window.close_document()

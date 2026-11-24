@@ -65,6 +65,8 @@ def mac_icon():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-tests", action="store_true")
+    parser.add_argument("--distpath", type=Path, default=ROOT / "dist",
+                        help="Output directory for this build (also permits a side-by-side local preview)")
     args = parser.parse_args()
     if sys.platform not in ("win32", "darwin"):
         raise SystemExit("Build on Windows or macOS; cross-compiling is not supported.")
@@ -81,13 +83,13 @@ def main():
     run("git","archive","--format=zip","--prefix=PDFReader-source/","-o","work/PDFReader-source.zip","HEAD")
     if sys.platform == "darwin":
         mac_icon()
-    run(sys.executable,"-m","PyInstaller","--noconfirm","--clean","--distpath","dist","--workpath","work/pyinstaller","packaging/pdfreader.spec")
+    run(sys.executable,"-m","PyInstaller","--noconfirm","--clean","--distpath",args.distpath,"--workpath","work/pyinstaller","packaging/pdfreader.spec")
     if sys.platform == "darwin":
-        app = ROOT/"dist/PDF Reader.app"
+        app = args.distpath / "PDF Reader.app"
         executable = app/"Contents/MacOS/PDF Reader"
         run("/usr/bin/codesign","--verify","--deep","--strict",app)
     else:
-        app = ROOT/"dist/PDF Reader"
+        app = args.distpath / "PDF Reader"
         executable = app/"PDF Reader.exe"
         for name in DOCS:
             shutil.copy2(ROOT/name,app/name)

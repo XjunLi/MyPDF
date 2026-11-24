@@ -56,8 +56,9 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.search_timer.setInterval(220)
         self.search_timer.timeout.connect(self.search)
         self.setWindowTitle("PDF Reader")
-        self.resize(1380, 900)
-        self.setMinimumSize(1000, 640)
+        self.setMinimumSize(760, 420)
+        available = self.screen().availableGeometry()
+        self.resize(min(1380, available.width() - 16), min(900, available.height() - 40))
         icon_path = resource_root() / "assets" / "reader.ico"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -272,6 +273,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.zoom_combo.setEnabled(ready)
         self.search_input.setEnabled(ready)
         self.page_spin.setMaximum(max(1, self.document.count))
+        self.page_spin.setFixedWidth(max(44, self.page_spin.fontMetrics().horizontalAdvance(str(self.document.count)) + 18))
         self.page_total.setText(f" / {self.document.count} ")
         filename = self.active_session.name if self.active_session else "PDF Reader"
         self.setWindowTitle(f"{'● ' if self.document.dirty else ''}{filename} — PDF Reader" if ready else "PDF Reader")
@@ -348,7 +350,7 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.mutate(self.document.redo)
 
     def rebuild_sidebar(self):
-        self.thumbnails.set_document(self.document)
+        self.thumbnails.set_document(self.document, self.view.items_by_page)
         self.thumbnails.select_page(self.view.current_page)
         self.bookmarks.clear()
         parents = [self.bookmarks.invisibleRootItem()]
@@ -356,10 +358,18 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
             while len(parents) > level:
                 parents.pop()
             item = QTreeWidgetItem([title])
-            item.setData(0, Qt.ItemDataRole.UserRole, max(0, page - 1))
+            item.setToolTip(0, title)
+            if 1 <= page <= self.document.count:
+                item.setData(0, Qt.ItemDataRole.UserRole, page - 1)
             parents[-1].addChild(item)
             parents.append(item)
         self.bookmarks.expandToDepth(0)
+        self.outline_stack.setCurrentWidget(self.bookmarks if self.bookmarks.topLevelItemCount() else self.empty_outline)
+
+    def go_to_bookmark(self, item, column):
+        number = item.data(0, Qt.ItemDataRole.UserRole)
+        if number is not None:
+            self.view.goto(number)
 
     def page_changed(self, number):
         # Do not replace a page number while the user is typing a destination.
@@ -390,7 +400,6 @@ class MainWindow(DocumentTabs, ReaderLayout, QMainWindow):
         self.zoom_changed(self.view.zoom)
 
     def fit_width(self):
-        self.view.fit_mode = True
         self.view.fit_width()
 
     def selection_changed(self, text):
